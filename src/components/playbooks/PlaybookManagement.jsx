@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import config from '../../config/env';
+import PlaybookAPI from '../../services/PlaybookAPI'; // Import the API service
 import LoadingSpinner from '../common/LoadingSpinner';
 import PlaybookList from './PlaybookList';
 import PlaybookBuilder from './PlaybookBuilder';
@@ -15,29 +15,41 @@ const PlaybookManagement = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [error, setError] = useState(null);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    size: 20,
+    total: 0,
+    pages: 0
+  });
 
   useEffect(() => {
     loadPlaybooks();
-  }, []);
+  }, [pagination.page, searchQuery, filterStatus]);
 
   const loadPlaybooks = async () => {
     try {
       setLoading(true);
       setError(null);
-      const token = localStorage.getItem(config.STORAGE_KEYS.ACCESS_TOKEN);
-      const response = await fetch(`${config.API_BASE_URL}/playbooks/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setPlaybooks(data.items || []);
-      } else {
-        throw new Error('Failed to load playbooks');
-      }
+      
+      // Prepare API parameters
+      const params = {
+        page: pagination.page,
+        size: pagination.size
+      };
+      
+      // Add search and filter params
+      if (searchQuery) params.search = searchQuery;
+      if (filterStatus !== 'all') params.status = filterStatus;
+      
+      // Use PlaybookAPI service instead of direct fetch
+      const data = await PlaybookAPI.getPlaybooks(params);
+      
+      setPlaybooks(data.items || []);
+      setPagination(prev => ({
+        ...prev,
+        total: data.total || 0,
+        pages: data.pages || 0
+      }));
     } catch (error) {
       console.error('Error loading playbooks:', error);
       setError(error.message);
@@ -67,6 +79,34 @@ const PlaybookManagement = () => {
     setSelectedPlaybook(null);
   };
 
+  const handleDeletePlaybook = async (playbookId) => {
+    if (!confirm('Are you sure you want to delete this playbook?')) {
+      return;
+    }
+
+    try {
+      await PlaybookAPI.deletePlaybook(playbookId);
+      await loadPlaybooks(); // Reload the list
+    } catch (error) {
+      console.error('Error deleting playbook:', error);
+      alert(`Failed to delete playbook: ${error.message}`);
+    }
+  };
+
+  const handlePageChange = (newPage) => {
+    setPagination(prev => ({ ...prev, page: newPage }));
+  };
+
+  const handleSearchChange = (query) => {
+    setSearchQuery(query);
+    setPagination(prev => ({ ...prev, page: 1 })); // Reset to first page when searching
+  };
+
+  const handleFilterChange = (status) => {
+    setFilterStatus(status);
+    setPagination(prev => ({ ...prev, page: 1 })); // Reset to first page when filtering
+  };
+
   const filteredPlaybooks = playbooks.filter(playbook => {
     const matchesSearch = playbook.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          playbook.description?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -92,15 +132,16 @@ const PlaybookManagement = () => {
                 Create, manage, and execute incident response playbooks
               </p>
             </div>
-            {activeTab !== 'list' && (
+            
+            {activeTab === 'list' && (
               <button
-                onClick={handleBack}
-                className="btn-secondary flex items-center space-x-2"
+                onClick={handleCreateNew}
+                className="px-6 py-3 bg-cerberus-green text-white rounded-lg hover:bg-cerberus-green/80 flex items-center gap-2"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                <span>Back to List</span>
+                New Playbook
               </button>
             )}
           </div>
@@ -108,55 +149,63 @@ const PlaybookManagement = () => {
 
         {/* Error Display */}
         {error && (
-          <div className="mb-6 bg-red-900/20 border border-red-500/50 rounded-lg p-4">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="mb-6 p-4 bg-red-900/50 border border-red-700 rounded-lg">
+            <div className="flex items-center gap-2 text-red-400">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span className="text-red-400">{error}</span>
+              {error}
             </div>
           </div>
         )}
 
-        {/* Tab Navigation */}
-        <div className="mb-6">
-          <nav className="flex space-x-8 border-b border-gray-700">
-            <button
-              onClick={() => setActiveTab('list')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'list'
-                  ? 'border-cerberus-green text-cerberus-green'
-                  : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'
-              }`}
-            >
-              Playbook Library
-            </button>
-            {activeTab === 'builder' && (
-              <button className="py-2 px-1 border-b-2 border-cerberus-green text-cerberus-green font-medium text-sm">
-                Playbook Builder
-              </button>
-            )}
-            {activeTab === 'editor' && selectedPlaybook && (
-              <button className="py-2 px-1 border-b-2 border-cerberus-green text-cerberus-green font-medium text-sm">
-                Edit: {selectedPlaybook.name}
-              </button>
-            )}
-          </nav>
-        </div>
-
-        {/* Content */}
+        {/* Main Content */}
         {activeTab === 'list' && (
-          <PlaybookList
-            playbooks={filteredPlaybooks}
-            onCreateNew={handleCreateNew}
-            onEditPlaybook={handleEditPlaybook}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            filterStatus={filterStatus}
-            setFilterStatus={setFilterStatus}
-            onRefresh={loadPlaybooks}
-            loading={loading}
-          />
+          <div className="space-y-6">
+            {/* Search and Filters */}
+            <div className="card-glass p-6">
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Search Playbooks
+                  </label>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleSearchChange(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                    placeholder="Search by name or description..."
+                  />
+                </div>
+                <div className="w-full md:w-48">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Filter by Status
+                  </label>
+                  <select
+                    value={filterStatus}
+                    onChange={(e) => handleFilterChange(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="deprecated">Deprecated</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Playbooks List */}
+            <PlaybookList
+              playbooks={filteredPlaybooks}
+              onEdit={handleEditPlaybook}
+              onDelete={handleDeletePlaybook}
+              loading={loading}
+              pagination={pagination}
+              onPageChange={handlePageChange}
+            />
+          </div>
         )}
 
         {activeTab === 'builder' && (

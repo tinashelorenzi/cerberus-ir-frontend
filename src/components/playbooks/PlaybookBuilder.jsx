@@ -1,116 +1,65 @@
-// File: src/components/playbooks/PlaybookBuilder.jsx
 import { useState } from 'react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
-import config from '../../config/env';
+import PlaybookAPI from '../../services/PlaybookAPI'; // Import the API service
 
 const PlaybookBuilder = ({ onSave, onCancel }) => {
   const [playbookData, setPlaybookData] = useState({
     name: '',
     description: '',
+    estimated_duration_minutes: 30,
     tags: [],
-    severity_levels: [],
-    alert_sources: [],
-    estimated_duration_minutes: 60,
     status: 'draft',
+    version: '1.0',
     playbook_definition: {
-      metadata: {
-        name: '',
-        description: '',
-        version: '1.0',
-        estimated_duration: 60
-      },
-      phases: [],
-      report_template: ''
+      metadata: {},
+      phases: []
     }
   });
-  
   const [currentTag, setCurrentTag] = useState('');
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});
 
-  const stepTypes = [
-    { type: 'manual_action', label: 'Manual Action', icon: '👤', color: 'bg-blue-500' },
-    { type: 'automated_action', label: 'Automated Action', icon: '🤖', color: 'bg-green-500' },
-    { type: 'user_input', label: 'User Input', icon: '📝', color: 'bg-yellow-500' },
-    { type: 'approval', label: 'Approval', icon: '✅', color: 'bg-purple-500' },
-    { type: 'notification', label: 'Notification', icon: '📧', color: 'bg-orange-500' },
-    { type: 'analysis', label: 'Analysis', icon: '🔍', color: 'bg-indigo-500' },
-    { type: 'decision_point', label: 'Decision Point', icon: '🔀', color: 'bg-red-500' },
-    { type: 'artifact_collection', label: 'Collect Evidence', icon: '📋', color: 'bg-cyan-500' }
-  ];
-
-  const addPhase = () => {
-    const newPhase = {
-      name: `phase_${playbookData.playbook_definition.phases.length + 1}`,
-      title: `Phase ${playbookData.playbook_definition.phases.length + 1}`,
-      description: '',
-      steps: []
-    };
+  const validateForm = () => {
+    const newErrors = {};
     
-    setPlaybookData(prev => ({
-      ...prev,
-      playbook_definition: {
-        ...prev.playbook_definition,
-        phases: [...prev.playbook_definition.phases, newPhase]
+    if (!playbookData.name.trim()) {
+      newErrors.name = 'Playbook name is required';
+    }
+    
+    if (!playbookData.description.trim()) {
+      newErrors.description = 'Description is required';
+    }
+    
+    if (playbookData.playbook_definition.phases.length === 0) {
+      newErrors.phases = 'At least one phase is required';
+    }
+    
+    // Validate each phase has at least one step
+    playbookData.playbook_definition.phases.forEach((phase, phaseIndex) => {
+      if (!phase.steps || phase.steps.length === 0) {
+        newErrors[`phase_${phaseIndex}_steps`] = `Phase "${phase.title || 'Untitled Phase'}" must have at least one step`;
       }
-    }));
-  };
-
-  const updatePhase = (phaseIndex, updates) => {
-    setPlaybookData(prev => ({
-      ...prev,
-      playbook_definition: {
-        ...prev.playbook_definition,
-        phases: prev.playbook_definition.phases.map((phase, index) => 
-          index === phaseIndex ? { ...phase, ...updates } : phase
-        )
-      }
-    }));
-  };
-
-  const addStep = (phaseIndex, stepType) => {
-    const newStep = {
-      name: `step_${Date.now()}`,
-      title: '',
-      type: stepType,
-      description: '',
-      required: true,
-      inputs: [],
-      instructions: '',
-      requires_approval: stepType === 'approval',
-      estimated_minutes: 15
-    };
-
-    updatePhase(phaseIndex, {
-      steps: [...playbookData.playbook_definition.phases[phaseIndex].steps, newStep]
     });
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
-  const updateStep = (phaseIndex, stepIndex, updates) => {
-    const updatedSteps = [...playbookData.playbook_definition.phases[phaseIndex].steps];
-    updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], ...updates };
-    updatePhase(phaseIndex, { steps: updatedSteps });
-  };
-
-  const removeStep = (phaseIndex, stepIndex) => {
-    const updatedSteps = playbookData.playbook_definition.phases[phaseIndex].steps.filter((_, index) => index !== stepIndex);
-    updatePhase(phaseIndex, { steps: updatedSteps });
-  };
-
-  const removePhase = (phaseIndex) => {
-    setPlaybookData(prev => ({
-      ...prev,
-      playbook_definition: {
-        ...prev.playbook_definition,
-        phases: prev.playbook_definition.phases.filter((_, index) => index !== phaseIndex)
-      }
-    }));
+  const updatePlaybookData = (updates) => {
+    setPlaybookData(prev => ({ ...prev, ...updates }));
+    // Clear related errors when updating
+    const newErrors = { ...errors };
+    if (updates.name && newErrors.name) delete newErrors.name;
+    if (updates.description && newErrors.description) delete newErrors.description;
+    setErrors(newErrors);
   };
 
   const addTag = () => {
-    if (currentTag.trim() && !playbookData.tags.includes(currentTag.trim())) {
+    if (currentTag.trim() && 
+        !(playbookData.tags || []).includes(currentTag.trim())) {
       setPlaybookData(prev => ({
         ...prev,
-        tags: [...prev.tags, currentTag.trim()]
+        tags: [...(prev.tags || []), currentTag.trim()]
       }));
       setCurrentTag('');
     }
@@ -119,47 +68,39 @@ const PlaybookBuilder = ({ onSave, onCancel }) => {
   const removeTag = (tagToRemove) => {
     setPlaybookData(prev => ({
       ...prev,
-      tags: prev.tags.filter(tag => tag !== tagToRemove)
+      tags: (prev.tags || []).filter(tag => tag !== tagToRemove)
     }));
   };
 
   const handleSave = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
     try {
       setSaving(true);
       
-      // Update metadata
-      const updatedPlaybook = {
+      // Prepare playbook data with metadata
+      const playbookToSave = {
         ...playbookData,
         playbook_definition: {
           ...playbookData.playbook_definition,
           metadata: {
-            ...playbookData.playbook_definition.metadata,
             name: playbookData.name,
             description: playbookData.description,
-            estimated_duration: playbookData.estimated_duration_minutes
+            estimated_duration: playbookData.estimated_duration_minutes,
+            version: playbookData.version || '1.0'
           }
         }
       };
 
-      const token = localStorage.getItem(config.STORAGE_KEYS.ACCESS_TOKEN);
-      const response = await fetch(`${config.API_BASE_URL}/playbooks/`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedPlaybook),
-      });
-
-      if (response.ok) {
-        onSave();
-      } else {
-        const errorData = await response.json();
-        alert(`Failed to save playbook: ${errorData.detail || 'Unknown error'}`);
-      }
+      // Use PlaybookAPI service instead of direct fetch
+      await PlaybookAPI.createPlaybook(playbookToSave);
+      
+      onSave();
     } catch (error) {
-      console.error('Error saving playbook:', error);
-      alert('Failed to save playbook');
+      console.error('Error creating playbook:', error);
+      alert(`Failed to create playbook: ${error.message}`);
     } finally {
       setSaving(false);
     }
@@ -173,344 +114,499 @@ const PlaybookBuilder = ({ onSave, onCancel }) => {
     if (source.droppableId === destination.droppableId) {
       // Reordering within the same phase
       const phaseIndex = parseInt(source.droppableId.split('-')[1]);
-      const steps = [...playbookData.playbook_definition.phases[phaseIndex].steps];
+      const steps = [...(playbookData.playbook_definition.phases[phaseIndex].steps || [])];
       const [reorderedStep] = steps.splice(source.index, 1);
       steps.splice(destination.index, 0, reorderedStep);
       updatePhase(phaseIndex, { steps });
     }
   };
 
+  const updatePhase = (phaseIndex, updates) => {
+    const updatedPhases = [...(playbookData.playbook_definition.phases || [])];
+    updatedPhases[phaseIndex] = { ...updatedPhases[phaseIndex], ...updates };
+    
+    setPlaybookData(prev => ({
+      ...prev,
+      playbook_definition: {
+        ...prev.playbook_definition,
+        phases: updatedPhases
+      }
+    }));
+    
+    // Clear phase-related errors
+    const newErrors = { ...errors };
+    if (newErrors.phases) delete newErrors.phases;
+    if (newErrors[`phase_${phaseIndex}_steps`]) delete newErrors[`phase_${phaseIndex}_steps`];
+    setErrors(newErrors);
+  };
+
+  const addPhase = () => {
+    const newPhase = {
+      name: `phase_${Date.now()}`,
+      title: 'New Phase',
+      description: '',
+      steps: []
+    };
+    
+    setPlaybookData(prev => ({
+      ...prev,
+      playbook_definition: {
+        ...prev.playbook_definition,
+        phases: [...(prev.playbook_definition.phases || []), newPhase]
+      }
+    }));
+    
+    // Clear phases error
+    const newErrors = { ...errors };
+    if (newErrors.phases) delete newErrors.phases;
+    setErrors(newErrors);
+  };
+
+  const removePhase = (phaseIndex) => {
+    const updatedPhases = [...(playbookData.playbook_definition.phases || [])];
+    updatedPhases.splice(phaseIndex, 1);
+    
+    setPlaybookData(prev => ({
+      ...prev,
+      playbook_definition: {
+        ...prev.playbook_definition,
+        phases: updatedPhases
+      }
+    }));
+  };
+
+  const addStep = (phaseIndex) => {
+    const newStep = {
+      name: `step_${Date.now()}`,
+      title: 'New Step',
+      type: 'manual_action',
+      description: '',
+      required: true,
+      inputs: [],
+      estimated_minutes: 5
+    };
+    
+    const updatedPhases = [...(playbookData.playbook_definition.phases || [])];
+    const phase = updatedPhases[phaseIndex];
+    phase.steps = [...(phase.steps || []), newStep];
+    
+    setPlaybookData(prev => ({
+      ...prev,
+      playbook_definition: {
+        ...prev.playbook_definition,
+        phases: updatedPhases
+      }
+    }));
+    
+    // Clear step error for this phase
+    const newErrors = { ...errors };
+    if (newErrors[`phase_${phaseIndex}_steps`]) delete newErrors[`phase_${phaseIndex}_steps`];
+    setErrors(newErrors);
+  };
+
+  const updateStep = (phaseIndex, stepIndex, updates) => {
+    const updatedPhases = [...(playbookData.playbook_definition.phases || [])];
+    const steps = [...updatedPhases[phaseIndex].steps];
+    steps[stepIndex] = { ...steps[stepIndex], ...updates };
+    updatedPhases[phaseIndex].steps = steps;
+    
+    setPlaybookData(prev => ({
+      ...prev,
+      playbook_definition: {
+        ...prev.playbook_definition,
+        phases: updatedPhases
+      }
+    }));
+  };
+
+  const removeStep = (phaseIndex, stepIndex) => {
+    const updatedPhases = [...(playbookData.playbook_definition.phases || [])];
+    updatedPhases[phaseIndex].steps.splice(stepIndex, 1);
+    
+    setPlaybookData(prev => ({
+      ...prev,
+      playbook_definition: {
+        ...prev.playbook_definition,
+        phases: updatedPhases
+      }
+    }));
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Basic Information */}
-      <div className="card-glass p-6">
-        <h2 className="text-xl font-bold text-white mb-4">Playbook Information</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Playbook Name *
-            </label>
-            <input
-              type="text"
-              value={playbookData.name}
-              onChange={(e) => setPlaybookData(prev => ({ ...prev, name: e.target.value }))}
-              className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
-              placeholder="Enter playbook name"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Estimated Duration (minutes)
-            </label>
-            <input
-              type="number"
-              value={playbookData.estimated_duration_minutes}
-              onChange={(e) => setPlaybookData(prev => ({ ...prev, estimated_duration_minutes: parseInt(e.target.value) || 60 }))}
-              className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
-              min="1"
-            />
-          </div>
-        </div>
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Description
-          </label>
-          <textarea
-            value={playbookData.description}
-            onChange={(e) => setPlaybookData(prev => ({ ...prev, description: e.target.value }))}
-            rows={3}
-            className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
-            placeholder="Describe the purpose and scope of this playbook"
-          />
-        </div>
-        
-        {/* Tags */}
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Tags
-          </label>
-          <div className="flex flex-wrap gap-2 mb-2">
-            {playbookData.tags.map((tag, index) => (
-              <span
-                key={index}
-                className="inline-flex items-center px-3 py-1 bg-cerberus-green/20 text-cerberus-green text-sm rounded-full"
-              >
-                {tag}
-                <button
-                  onClick={() => removeTag(tag)}
-                  className="ml-2 text-cerberus-green/70 hover:text-cerberus-green"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={currentTag}
-              onChange={(e) => setCurrentTag(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && addTag()}
-              className="flex-1 px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
-              placeholder="Add tags..."
-            />
+    <div className="min-h-screen bg-cerberus-dark">
+      {/* Header */}
+      <div className="bg-gray-900/50 backdrop-blur-sm border-b border-gray-700 p-6">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
             <button
-              onClick={addTag}
-              className="px-4 py-2 bg-cerberus-green text-white rounded-lg hover:bg-cerberus-green/80"
+              onClick={onCancel}
+              className="p-2 text-gray-400 hover:text-white transition-colors"
             >
-              Add
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <div>
+              <h1 className="text-2xl font-bold text-white">Create New Playbook</h1>
+              <p className="text-gray-400">Build a new incident response playbook</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onCancel}
+              className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-6 py-2 bg-cerberus-green text-white rounded-lg hover:bg-cerberus-green/80 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {saving && (
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              {saving ? 'Creating...' : 'Create Playbook'}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Phases and Steps - Kanban Style */}
-      <div className="card-glass p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-white">Playbook Phases</h2>
-          <button
-            onClick={addPhase}
-            className="btn-primary flex items-center space-x-2"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            <span>Add Phase</span>
-          </button>
-        </div>
-
-        <DragDropContext onDragEnd={onDragEnd}>
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {playbookData.playbook_definition.phases.map((phase, phaseIndex) => (
-              <div key={phaseIndex} className="bg-gray-800/30 rounded-lg border border-gray-600/50">
-                {/* Phase Header */}
-                <div className="p-4 border-b border-gray-600/50">
-                  <div className="flex items-center justify-between mb-2">
-                    <input
-                      type="text"
-                      value={phase.title}
-                      onChange={(e) => updatePhase(phaseIndex, { title: e.target.value })}
-                      className="text-lg font-semibold bg-transparent text-white border-none outline-none flex-1"
-                      placeholder="Phase Title"
-                    />
-                    <button
-                      onClick={() => removePhase(phaseIndex)}
-                      className="text-red-400 hover:text-red-300 p-1"
-                      title="Remove Phase"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </div>
-                  <textarea
-                    value={phase.description}
-                    onChange={(e) => updatePhase(phaseIndex, { description: e.target.value })}
-                    placeholder="Phase description..."
-                    className="w-full text-sm bg-transparent text-gray-300 border-none outline-none resize-none"
-                    rows={2}
-                  />
-                </div>
-
-                {/* Steps */}
-                <Droppable droppableId={`phase-${phaseIndex}`}>
-                  {(provided) => (
-                    <div
-                      {...provided.droppableProps}
-                      ref={provided.innerRef}
-                      className="p-4 min-h-[200px]"
-                    >
-                      {phase.steps.map((step, stepIndex) => (
-                        <Draggable
-                          key={stepIndex}
-                          draggableId={`${phaseIndex}-${stepIndex}`}
-                          index={stepIndex}
-                        >
-                          {(provided) => (
-                            <div
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              className="mb-3 p-3 bg-gray-700/50 rounded-lg border border-gray-600/30 hover:border-cerberus-green/50 transition-colors"
-                            >
-                              <div className="flex items-start justify-between mb-2">
-                                <div className="flex items-center space-x-2 flex-1">
-                                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                                    stepTypes.find(t => t.type === step.type)?.color || 'bg-gray-500'
-                                  }`}>
-                                    {stepTypes.find(t => t.type === step.type)?.icon || '?'}
-                                  </span>
-                                  <input
-                                    type="text"
-                                    value={step.title}
-                                    onChange={(e) => updateStep(phaseIndex, stepIndex, { title: e.target.value })}
-                                    className="text-sm font-medium bg-transparent text-white border-none outline-none flex-1"
-                                    placeholder="Step title"
-                                  />
-                                </div>
-                                <button
-                                  onClick={() => removeStep(phaseIndex, stepIndex)}
-                                  className="text-red-400 hover:text-red-300 p-1"
-                                  title="Remove Step"
-                                >
-                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                  </svg>
-                                </button>
-                              </div>
-                              
-                              <select
-                                value={step.type}
-                                onChange={(e) => updateStep(phaseIndex, stepIndex, { type: e.target.value })}
-                                className="w-full text-xs bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-300 mb-2"
-                              >
-                                {stepTypes.map(stepType => (
-                                  <option key={stepType.type} value={stepType.type}>
-                                    {stepType.label}
-                                  </option>
-                                ))}
-                              </select>
-
-                              <textarea
-                                value={step.description}
-                                onChange={(e) => updateStep(phaseIndex, stepIndex, { description: e.target.value })}
-                                placeholder="Step description..."
-                                className="w-full text-xs bg-transparent text-gray-400 border-none outline-none resize-none"
-                                rows={2}
-                              />
-
-                              <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
-                                <label className="flex items-center space-x-1">
-                                  <input
-                                    type="checkbox"
-                                    checked={step.required}
-                                    onChange={(e) => updateStep(phaseIndex, stepIndex, { required: e.target.checked })}
-                                    className="rounded"
-                                  />
-                                  <span>Required</span>
-                                </label>
-                                <div className="flex items-center space-x-1">
-                                  <span>⏱</span>
-                                  <input
-                                    type="number"
-                                    value={step.estimated_minutes || 15}
-                                    onChange={(e) => updateStep(phaseIndex, stepIndex, { estimated_minutes: parseInt(e.target.value) || 15 })}
-                                    className="w-12 bg-transparent border-none outline-none text-center"
-                                    min="1"
-                                  />
-                                  <span>min</span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
-
-                      {/* Add Step Buttons */}
-                      <div className="grid grid-cols-2 gap-2 mt-4">
-                        {stepTypes.slice(0, 4).map(stepType => (
-                          <button
-                            key={stepType.type}
-                            onClick={() => addStep(phaseIndex, stepType.type)}
-                            className="p-2 bg-gray-800/50 hover:bg-gray-700/50 rounded-lg border border-gray-600/30 hover:border-cerberus-green/50 transition-colors text-xs text-gray-300 flex items-center space-x-1"
-                          >
-                            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-xs ${stepType.color}`}>
-                              {stepType.icon}
-                            </span>
-                            <span className="truncate">{stepType.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                      
-                      {stepTypes.length > 4 && (
-                        <details className="mt-2">
-                          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-300 mb-2">
-                            More step types...
-                          </summary>
-                          <div className="grid grid-cols-2 gap-2">
-                            {stepTypes.slice(4).map(stepType => (
-                              <button
-                                key={stepType.type}
-                                onClick={() => addStep(phaseIndex, stepType.type)}
-                                className="p-2 bg-gray-800/50 hover:bg-gray-700/50 rounded-lg border border-gray-600/30 hover:border-cerberus-green/50 transition-colors text-xs text-gray-300 flex items-center space-x-1"
-                              >
-                                <span className={`w-4 h-4 rounded-full flex items-center justify-center text-xs ${stepType.color}`}>
-                                  {stepType.icon}
-                                </span>
-                                <span className="truncate">{stepType.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  )}
-                </Droppable>
-              </div>
-            ))}
-          </div>
-        </DragDropContext>
-
-        {playbookData.playbook_definition.phases.length === 0 && (
-          <div className="text-center py-12 border-2 border-dashed border-gray-600 rounded-lg">
-            <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
-            <h3 className="text-lg font-medium text-white mb-2">No phases yet</h3>
-            <p className="text-gray-400 mb-4">Start building your playbook by adding the first phase</p>
-            <button
-              onClick={addPhase}
-              className="btn-primary"
-            >
-              Add First Phase
-            </button>
+      <div className="max-w-7xl mx-auto p-6 space-y-6">
+        {/* Error Summary */}
+        {Object.keys(errors).length > 0 && Object.values(errors).some(error => error) && (
+          <div className="card-glass p-4 border-l-4 border-red-500">
+            <div className="flex items-center gap-2 text-red-400 mb-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="font-medium">Please fix the following errors:</span>
+            </div>
+            <ul className="list-disc list-inside text-red-300 text-sm space-y-1">
+              {Object.values(errors).filter(error => error).map((error, index) => (
+                <li key={index}>{error}</li>
+              ))}
+            </ul>
           </div>
         )}
-      </div>
 
-      {/* Actions */}
-      <div className="flex items-center justify-between pt-6 border-t border-gray-700">
-        <button
-          onClick={onCancel}
-          className="btn-secondary"
-          disabled={saving}
-        >
-          Cancel
-        </button>
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setPlaybookData(prev => ({ ...prev, status: 'draft' }))}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              playbookData.status === 'draft'
-                ? 'bg-yellow-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            Save as Draft
-          </button>
-          <button
-            onClick={() => setPlaybookData(prev => ({ ...prev, status: 'active' }))}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              playbookData.status === 'active'
-                ? 'bg-green-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            Publish as Active
-          </button>
+        {/* Basic Information */}
+        <div className="card-glass p-6">
+          <h2 className="text-xl font-semibold text-white mb-4">Basic Information</h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Playbook Name *
+              </label>
+              <input
+                type="text"
+                value={playbookData.name}
+                onChange={(e) => updatePlaybookData({ name: e.target.value })}
+                className={`w-full px-3 py-2 bg-gray-800/50 border rounded-lg text-white focus:ring-1 ${
+                  errors.name 
+                    ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
+                    : 'border-gray-600 focus:border-cerberus-green focus:ring-cerberus-green'
+                }`}
+                placeholder="Enter playbook name"
+              />
+              {errors.name && <p className="text-red-400 text-sm mt-1">{errors.name}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Estimated Duration (minutes)
+              </label>
+              <input
+                type="number"
+                value={playbookData.estimated_duration_minutes}
+                onChange={(e) => updatePlaybookData({ estimated_duration_minutes: parseInt(e.target.value) || 30 })}
+                className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                min="1"
+              />
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Description *
+            </label>
+            <textarea
+              value={playbookData.description}
+              onChange={(e) => updatePlaybookData({ description: e.target.value })}
+              className={`w-full px-3 py-2 bg-gray-800/50 border rounded-lg text-white focus:ring-1 ${
+                errors.description 
+                  ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
+                  : 'border-gray-600 focus:border-cerberus-green focus:ring-cerberus-green'
+              }`}
+              rows="3"
+              placeholder="Describe what this playbook is for and when to use it"
+            />
+            {errors.description && <p className="text-red-400 text-sm mt-1">{errors.description}</p>}
+          </div>
+
+          {/* Tags */}
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Tags
+            </label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {(playbookData.tags || []).map((tag, index) => (
+                <span
+                  key={index}
+                  className="inline-flex items-center gap-1 px-3 py-1 bg-cerberus-green/20 text-cerberus-green rounded-full text-sm"
+                >
+                  {tag}
+                  <button
+                    onClick={() => removeTag(tag)}
+                    className="text-cerberus-green hover:text-red-400"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={currentTag}
+                onChange={(e) => setCurrentTag(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && addTag()}
+                className="flex-1 px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                placeholder="Add tags..."
+              />
+              <button
+                onClick={addTag}
+                className="px-4 py-2 bg-cerberus-green text-white rounded-lg hover:bg-cerberus-green/80"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* Status and Version */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Status
+              </label>
+              <select
+                value={playbookData.status || 'draft'}
+                onChange={(e) => updatePlaybookData({ status: e.target.value })}
+                className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+              >
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+                <option value="deprecated">Deprecated</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Version
+              </label>
+              <input
+                type="text"
+                value={playbookData.version || '1.0'}
+                onChange={(e) => updatePlaybookData({ version: e.target.value })}
+                className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                placeholder="1.0"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Phases and Steps */}
+        <div className="card-glass p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-semibold text-white">Playbook Phases</h2>
+              {errors.phases && <p className="text-red-400 text-sm mt-1">{errors.phases}</p>}
+            </div>
+            <button
+              onClick={addPhase}
+              className="px-4 py-2 bg-cerberus-green text-white rounded-lg hover:bg-cerberus-green/80 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add Phase
+            </button>
+          </div>
+
+          <DragDropContext onDragEnd={onDragEnd}>
+            <div className="space-y-6">
+              {(playbookData.playbook_definition.phases || []).map((phase, phaseIndex) => (
+                <div key={phaseIndex} className="bg-gray-800/30 rounded-lg p-4 border border-gray-700">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex-1">
+                      <input
+                        type="text"
+                        value={phase.title || ''}
+                        onChange={(e) => updatePhase(phaseIndex, { title: e.target.value })}
+                        className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white text-lg font-medium focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                        placeholder="Phase Title"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      <button
+                        onClick={() => addStep(phaseIndex)}
+                        className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                      >
+                        Add Step
+                      </button>
+                      <button
+                        onClick={() => removePhase(phaseIndex)}
+                        className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={phase.description || ''}
+                    onChange={(e) => updatePhase(phaseIndex, { description: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white text-sm mb-4 focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                    rows="2"
+                    placeholder="Phase description"
+                  />
+
+                  {errors[`phase_${phaseIndex}_steps`] && (
+                    <div className="mb-4 p-2 bg-red-900/50 border border-red-700 rounded text-red-400 text-sm">
+                      {errors[`phase_${phaseIndex}_steps`]}
+                    </div>
+                  )}
+
+                  <Droppable droppableId={`phase-${phaseIndex}`}>
+                    {(provided) => (
+                      <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-2">
+                        {(phase.steps || []).map((step, stepIndex) => (
+                          <Draggable key={stepIndex} draggableId={`step-${phaseIndex}-${stepIndex}`} index={stepIndex}>
+                            {(provided) => (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                {...provided.dragHandleProps}
+                                className="bg-gray-700/50 rounded-lg p-3 border border-gray-600"
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <input
+                                    type="text"
+                                    value={step.title || ''}
+                                    onChange={(e) => updateStep(phaseIndex, stepIndex, { title: e.target.value })}
+                                    className="flex-1 px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                                    placeholder="Step Title"
+                                  />
+                                  <button
+                                    onClick={() => removeStep(phaseIndex, stepIndex)}
+                                    className="ml-2 px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
+                                  <select
+                                    value={step.type || 'manual_action'}
+                                    onChange={(e) => updateStep(phaseIndex, stepIndex, { type: e.target.value })}
+                                    className="px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white text-sm focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                                  >
+                                    <option value="manual_action">Manual Action</option>
+                                    <option value="automated_action">Automated Action</option>
+                                    <option value="user_input">User Input</option>
+                                    <option value="approval">Approval</option>
+                                    <option value="notification">Notification</option>
+                                    <option value="artifact_collection">Artifact Collection</option>
+                                    <option value="analysis">Analysis</option>
+                                    <option value="decision_point">Decision Point</option>
+                                    <option value="report_generation">Report Generation</option>
+                                  </select>
+                                  
+                                  <input
+                                    type="number"
+                                    value={step.estimated_minutes || 5}
+                                    onChange={(e) => updateStep(phaseIndex, stepIndex, { estimated_minutes: parseInt(e.target.value) || 5 })}
+                                    className="px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white text-sm focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                                    placeholder="Minutes"
+                                    min="1"
+                                  />
+                                  
+                                  <label className="flex items-center gap-2 text-sm text-gray-300">
+                                    <input
+                                      type="checkbox"
+                                      checked={step.required !== false}
+                                      onChange={(e) => updateStep(phaseIndex, stepIndex, { required: e.target.checked })}
+                                      className="rounded"
+                                    />
+                                    Required
+                                  </label>
+                                </div>
+                                
+                                <textarea
+                                  value={step.description || ''}
+                                  onChange={(e) => updateStep(phaseIndex, stepIndex, { description: e.target.value })}
+                                  className="w-full px-3 py-2 bg-gray-800/50 border border-gray-600 rounded-lg text-white text-sm focus:border-cerberus-green focus:ring-1 focus:ring-cerberus-green"
+                                  rows="2"
+                                  placeholder="Step description or instructions"
+                                />
+                              </div>
+                            )}
+                          </Draggable>
+                        ))}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </div>
+              ))}
+            </div>
+          </DragDropContext>
+
+          {playbookData.playbook_definition.phases?.length === 0 && (
+            <div className="text-center py-12">
+              <div className="text-gray-400 mb-4">
+                <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                <p>No phases created yet</p>
+                <p className="text-sm">Add phases to structure your incident response process</p>
+              </div>
+              <button
+                onClick={addPhase}
+                className="px-6 py-3 bg-cerberus-green text-white rounded-lg hover:bg-cerberus-green/80"
+              >
+                Create First Phase
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Floating Save Button */}
+        <div className="fixed bottom-6 right-6 z-50">
           <button
             onClick={handleSave}
-            disabled={saving || !playbookData.name.trim()}
-            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+            disabled={saving}
+            className="px-8 py-4 bg-cerberus-green text-white rounded-full shadow-2xl hover:bg-cerberus-green/80 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 font-medium"
           >
-            {saving && (
-              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
+            {saving ? (
+              <>
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Creating...
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Save Playbook
+              </>
             )}
-            <span>{saving ? 'Saving...' : 'Save Playbook'}</span>
           </button>
         </div>
       </div>
