@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import PlaybookManagement from './playbooks/PlaybookManagement'
 
-function Dashboard() {
+function Dashboard({ currentView, setCurrentView }) {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState('dashboard')
   const [incidents] = useState([
     { id: 1, title: 'Suspicious Network Activity', severity: 'High', status: 'Active', time: '2 hours ago', assignee: 'John Smith' },
     { id: 2, title: 'Unauthorized Access Attempt', severity: 'Medium', status: 'Investigating', time: '4 hours ago', assignee: 'Sarah Johnson' },
@@ -63,35 +63,20 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-cerberus-dark">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Welcome Section */}
-        <div className="mb-8 animate-fade-in">
-          <h1 className="text-3xl font-bold text-white mb-2">
-            Welcome back, {user?.full_name?.split(' ')[0]} 👋
-          </h1>
-          <p className="text-gray-400">
-            Here's what's happening with your security operations today.
-          </p>
-        </div>
-
-        {/* Navigation Tabs */}
-        <nav className="flex space-x-8 mb-8">
-          {['dashboard', 'incidents', 'analytics', 'reports'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
-                activeTab === tab
-                  ? 'bg-cerberus-green text-white shadow-lg'
-                  : 'text-gray-300 hover:text-white hover:bg-gray-700/50'
-              }`}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </nav>
+        {/* Welcome Section - Only show for dashboard view */}
+        {currentView === 'dashboard' && (
+          <div className="mb-8 animate-fade-in">
+            <h1 className="text-3xl font-bold text-white mb-2">
+              Welcome back, {user?.full_name?.split(' ')[0]} 👋
+            </h1>
+            <p className="text-gray-400">
+              Here's what's happening with your security operations today.
+            </p>
+          </div>
+        )}
 
         {/* Dashboard Content */}
-        {activeTab === 'dashboard' && (
+        {currentView === 'dashboard' && (
           <div className="space-y-8">
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -262,19 +247,24 @@ function Dashboard() {
           </div>
         )}
 
+        {/* Playbooks Management */}
+        {currentView === 'playbooks' && (
+          <PlaybookManagement />
+        )}
+
         {/* Other tabs placeholder */}
-        {activeTab !== 'dashboard' && (
+        {!['dashboard', 'playbooks'].includes(currentView) && (
           <div className="card-glass animate-fade-in">
             <div className="text-center py-16">
               <div className="text-6xl mb-4">🚧</div>
               <h2 className="text-2xl font-semibold text-white mb-4">
-                {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module
+                {currentView.charAt(0).toUpperCase() + currentView.slice(1)} Module
               </h2>
               <p className="text-gray-400 mb-6">
                 This feature is currently under development and will be available soon.
               </p>
               <button 
-                onClick={() => setActiveTab('dashboard')}
+                onClick={() => setCurrentView('dashboard')}
                 className="btn-primary"
               >
                 Return to Dashboard

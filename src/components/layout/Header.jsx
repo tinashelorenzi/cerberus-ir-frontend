@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 
-const Header = () => {
+const Header = ({ currentView, setCurrentView }) => {
   const { user, logout } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -52,18 +52,38 @@ const Header = () => {
 
           {/* Navigation Links */}
           <nav className="hidden md:flex items-center space-x-8">
-            <a href="#dashboard" className="nav-link nav-link-active">
+            <button
+              onClick={() => setCurrentView('dashboard')}
+              className={`nav-link ${currentView === 'dashboard' ? 'nav-link-active' : ''}`}
+            >
               Dashboard
-            </a>
-            <a href="#incidents" className="nav-link">
+            </button>
+            <button
+              onClick={() => setCurrentView('incidents')}
+              className={`nav-link ${currentView === 'incidents' ? 'nav-link-active' : ''}`}
+            >
               Incidents
-            </a>
-            <a href="#analytics" className="nav-link">
+            </button>
+            <button
+              onClick={() => setCurrentView('analytics')}
+              className={`nav-link ${currentView === 'analytics' ? 'nav-link-active' : ''}`}
+            >
               Analytics
-            </a>
-            <a href="#reports" className="nav-link">
+            </button>
+            <button
+              onClick={() => setCurrentView('reports')}
+              className={`nav-link ${currentView === 'reports' ? 'nav-link-active' : ''}`}
+            >
               Reports
-            </a>
+            </button>
+            {user?.role === 'admin' && (
+                <button
+                onClick={() => setCurrentView('playbooks')}
+                className={`nav-link ${currentView === 'playbooks' ? 'nav-link-active' : ''}`}
+                >
+                    Playbooks Management
+                </button>
+            )}
           </nav>
 
           {/* User Profile */}
