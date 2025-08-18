@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
-const Header = ({ currentView, setCurrentView }) => {
+const Header = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -38,6 +41,10 @@ const Header = ({ currentView, setCurrentView }) => {
     return roleNames[role] || role;
   };
 
+  const isActive = (path) => {
+    return location.pathname === path;
+  };
+
   return (
     <header className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700/50 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -53,33 +60,33 @@ const Header = ({ currentView, setCurrentView }) => {
           {/* Navigation Links */}
           <nav className="hidden md:flex items-center space-x-8">
             <button
-              onClick={() => setCurrentView('dashboard')}
-              className={`nav-link ${currentView === 'dashboard' ? 'nav-link-active' : ''}`}
+              onClick={() => navigate('/dashboard')}
+              className={`nav-link ${isActive('/dashboard') ? 'nav-link-active' : ''}`}
             >
               Dashboard
             </button>
             <button
-              onClick={() => setCurrentView('incidents')}
-              className={`nav-link ${currentView === 'incidents' ? 'nav-link-active' : ''}`}
+              onClick={() => navigate('/incidents')}
+              className={`nav-link ${isActive('/incidents') ? 'nav-link-active' : ''}`}
             >
               Incidents
             </button>
             <button
-              onClick={() => setCurrentView('analytics')}
-              className={`nav-link ${currentView === 'analytics' ? 'nav-link-active' : ''}`}
+              onClick={() => navigate('/analytics')}
+              className={`nav-link ${isActive('/analytics') ? 'nav-link-active' : ''}`}
             >
               Analytics
             </button>
             <button
-              onClick={() => setCurrentView('reports')}
-              className={`nav-link ${currentView === 'reports' ? 'nav-link-active' : ''}`}
+              onClick={() => navigate('/reports')}
+              className={`nav-link ${isActive('/reports') ? 'nav-link-active' : ''}`}
             >
               Reports
             </button>
             {user?.role === 'admin' && (
                 <button
-                onClick={() => setCurrentView('playbooks')}
-                className={`nav-link ${currentView === 'playbooks' ? 'nav-link-active' : ''}`}
+                onClick={() => navigate('/playbooks')}
+                className={`nav-link ${isActive('/playbooks') ? 'nav-link-active' : ''}`}
                 >
                     Playbooks Management
                 </button>
