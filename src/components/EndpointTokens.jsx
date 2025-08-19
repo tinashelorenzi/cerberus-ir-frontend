@@ -41,6 +41,38 @@ const TokenManagement = () => {
     loadTokens();
   }, [currentPage, searchTerm, activeOnly]);
 
+  const validateFormData = () => {
+    const errors = [];
+    
+    if (!formData.token_name || formData.token_name.trim().length === 0) {
+      errors.push('Token name is required');
+    }
+    
+    if (formData.token_name && !/^[a-zA-Z0-9\s\-_]+$/.test(formData.token_name.trim())) {
+      errors.push('Token name can only contain letters, numbers, spaces, hyphens, and underscores');
+    }
+    
+    if (formData.rate_limit_per_minute < 1 || formData.rate_limit_per_minute > 1000) {
+      errors.push('Rate limit must be between 1 and 1000');
+    }
+    
+    if (formData.expires_in_days && (formData.expires_in_days < 1 || formData.expires_in_days > 365)) {
+      errors.push('Expiration days must be between 1 and 365');
+    }
+    
+    // Validate IP addresses if provided
+    if (formData.allowed_ips && formData.allowed_ips.length > 0) {
+      formData.allowed_ips.forEach(ip => {
+        // Basic IP validation - you might want to use a proper IP validation library
+        if (!/^(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?$/.test(ip.trim())) {
+          errors.push(`Invalid IP address: ${ip}`);
+        }
+      });
+    }
+    
+    return errors;
+  };
+
   const loadTokens = async () => {
     try {
       setLoading(true);
@@ -64,17 +96,32 @@ const TokenManagement = () => {
 
   const handleCreateToken = async (e) => {
     e.preventDefault();
+    
+    const validationErrors = validateFormData();
+    if (validationErrors.length > 0) {
+      setError('Validation errors: ' + validationErrors.join(', '));
+      return;
+    }
+    
     try {
       setLoading(true);
       
-      // Prepare data for API
+      // Prepare data to match FastAPI schema exactly
       const tokenData = {
-        ...formData,
-        allowed_ips: formData.allowed_ips.length > 0 ? formData.allowed_ips : null,
-        allowed_sources: formData.allowed_sources.length > 0 ? formData.allowed_sources : null,
-        expires_in_days: formData.expires_in_days || null
+        token_name: formData.token_name.trim(),
+        description: formData.description?.trim() || null,
+        can_create_alerts: Boolean(formData.can_create_alerts),
+        can_update_alerts: Boolean(formData.can_update_alerts),
+        can_read_alerts: Boolean(formData.can_read_alerts),
+        rate_limit_per_minute: parseInt(formData.rate_limit_per_minute, 10),
+        expires_in_days: formData.expires_in_days ? parseInt(formData.expires_in_days, 10) : null,
+        // Only include arrays if they have content, otherwise send null
+        allowed_ips: formData.allowed_ips && formData.allowed_ips.length > 0 ? formData.allowed_ips : null,
+        allowed_sources: formData.allowed_sources && formData.allowed_sources.length > 0 ? formData.allowed_sources : null
       };
 
+      console.log('Sending token data:', tokenData); // Debug logging
+      
       const response = await EndpointTokensAPI.createToken(tokenData);
       
       // Show the created token (only chance to see it)
@@ -88,6 +135,7 @@ const TokenManagement = () => {
       // Reload tokens list
       await loadTokens();
     } catch (err) {
+      console.error('Token creation error:', err); // Debug logging
       setError('Failed to create token: ' + err.message);
     } finally {
       setLoading(false);
@@ -96,6 +144,13 @@ const TokenManagement = () => {
 
   const handleUpdateToken = async (e) => {
     e.preventDefault();
+    
+    const validationErrors = validateFormData();
+    if (validationErrors.length > 0) {
+      setError('Validation errors: ' + validationErrors.join(', '));
+      return;
+    }
+    
     try {
       setLoading(true);
       
@@ -934,7 +989,7 @@ const TokenManagement = () => {
       {/* Token Display Modal */}
       {showTokenModal && createdToken && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-cerberus-dark-light rounded-lg max-w-md w-full">
+          <div className="bg-cerberus-dark-light rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="text-center mb-6">
                 <div className="w-16 h-16 bg-cerberus-green rounded-full flex items-center justify-center mx-auto mb-4">
@@ -958,18 +1013,19 @@ const TokenManagement = () => {
 
                 <div>
                   <label className="form-label">API Token</label>
-                  <div className="flex space-x-2">
-                    <div className="input-field bg-gray-800 text-gray-300 flex-1 font-mono text-sm">
+                  <div className="space-y-2">
+                    <div className="bg-gray-800 text-gray-300 font-mono text-sm p-3 rounded-lg border border-gray-700 break-all max-h-32 overflow-y-auto">
                       {createdToken.token}
                     </div>
                     <button
                       onClick={() => copyToClipboard(createdToken.token)}
-                      className="button-secondary"
+                      className="button-secondary w-full"
                       title="Copy to clipboard"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                       </svg>
+                      Copy Token to Clipboard
                     </button>
                   </div>
                 </div>
@@ -991,17 +1047,11 @@ const TokenManagement = () => {
 
               <div className="flex space-x-4 mt-6">
                 <button
-                  onClick={() => copyToClipboard(createdToken.token)}
-                  className="button-primary flex-1"
-                >
-                  Copy Token
-                </button>
-                <button
                   onClick={() => {
                     setShowTokenModal(false);
                     setCreatedToken(null);
                   }}
-                  className="button-secondary flex-1"
+                  className="button-primary flex-1"
                 >
                   Close
                 </button>

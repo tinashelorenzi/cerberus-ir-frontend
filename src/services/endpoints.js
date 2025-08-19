@@ -17,15 +17,35 @@ class EndpointTokensAPI {
   // Handle API responses
   async handleResponse(response) {
     if (response.status === 401) {
-      // Token expired, redirect to login
       localStorage.clear();
       window.location.reload();
       return;
     }
     
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || 'API request failed');
+      try {
+        const error = await response.json();
+        // Handle different error response formats
+        let errorMessage = 'API request failed';
+        
+        if (error.detail) {
+          // FastAPI validation error format
+          if (Array.isArray(error.detail)) {
+            errorMessage = error.detail.map(e => `${e.loc.join('.')}: ${e.msg}`).join(', ');
+          } else if (typeof error.detail === 'string') {
+            errorMessage = error.detail;
+          }
+        } else if (error.message) {
+          errorMessage = error.message;
+        } else if (typeof error === 'string') {
+          errorMessage = error;
+        }
+        
+        throw new Error(errorMessage);
+      } catch (jsonError) {
+        // If JSON parsing fails, use status text
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      }
     }
     
     return response.json();
@@ -105,17 +125,8 @@ class EndpointTokensAPI {
       }
     );
 
-    if (response.status === 401) {
-      localStorage.clear();
-      window.location.reload();
-      return;
-    }
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || 'API request failed');
-    }
-
+    // Use the improved handleResponse method
+    await this.handleResponse(response);
     return true; // Delete usually returns no content
   }
 
