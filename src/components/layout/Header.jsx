@@ -83,6 +83,12 @@ const Header = () => {
             >
               Reports
             </button>
+            <button
+              onClick={() => navigate('/endpoint-tokens')}
+              className={`nav-link ${isActive('/endpoint-tokens') ? 'nav-link-active' : ''}`}
+            >
+              Endpoint Tokens
+            </button>
             {user?.role === 'admin' && (
                 <button
                 onClick={() => navigate('/playbooks')}

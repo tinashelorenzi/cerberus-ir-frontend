@@ -4,6 +4,7 @@ import ProtectedRoute from './components/auth/ProtectedRoute'
 import Header from './components/layout/Header'
 import Dashboard from './components/Dashboard'
 import PlaybookManagement from './components/playbooks/PlaybookManagement'
+import EndpointTokens from './components/EndpointTokens'
 import './index.css'
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/playbooks" element={<PlaybookManagement />} />
+              <Route path="/endpoint-tokens" element={<EndpointTokens />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </ProtectedRoute>
