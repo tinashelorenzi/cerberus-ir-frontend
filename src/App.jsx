@@ -5,6 +5,7 @@ import Header from './components/layout/Header'
 import Dashboard from './components/Dashboard'
 import PlaybookManagement from './components/playbooks/PlaybookManagement'
 import EndpointTokens from './components/EndpointTokens'
+import Incidents from './components/Incidents'
 import './index.css'
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/incidents" element={<Incidents />} />
               <Route path="/playbooks" element={<PlaybookManagement />} />
               <Route path="/endpoint-tokens" element={<EndpointTokens />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
