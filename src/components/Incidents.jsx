@@ -1,187 +1,341 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import incidentsAPI from '../services/incidents';
 
 const Incidents = () => {
   const { user } = useAuth();
-  const [selectedSeverity, setSelectedSeverity] = useState('all');
-  const [selectedStatus, setSelectedStatus] = useState('all');
-
-  // Mock data for demonstration
-  const incidents = [
-    {
-      id: 'INC-2024-001',
-      title: 'Suspicious Network Activity Detected',
-      severity: 'High',
-      status: 'Open',
-      assignee: 'John Doe',
-      source: 'SIEM Alert',
-      timestamp: '2024-01-15T10:30:00Z',
-      description: 'Multiple failed login attempts detected from external IP addresses.'
-    },
-    {
-      id: 'INC-2024-002',
-      title: 'Malware Detection Alert',
-      severity: 'Critical',
-      status: 'In Progress',
-      assignee: 'Jane Smith',
-      source: 'EDR System',
-      timestamp: '2024-01-15T09:15:00Z',
-      description: 'Suspicious file execution detected on endpoint workstation.'
-    },
-    {
-      id: 'INC-2024-003',
-      title: 'Data Exfiltration Attempt',
-      severity: 'Critical',
-      status: 'Open',
-      assignee: 'Mike Johnson',
-      source: 'DLP System',
-      timestamp: '2024-01-15T08:45:00Z',
-      description: 'Large data transfer detected to external server.'
-    },
-    {
-      id: 'INC-2024-004',
-      title: 'Phishing Email Campaign',
-      severity: 'Medium',
-      status: 'Resolved',
-      assignee: 'Sarah Lee',
-      source: 'Email Security',
-      timestamp: '2024-01-14T16:20:00Z',
-      description: 'Phishing emails targeting company employees detected.'
-    },
-    {
-      id: 'INC-2024-005',
-      title: 'Unauthorized Access Attempt',
-      severity: 'Low',
-      status: 'Closed',
-      assignee: 'David Chen',
-      source: 'Access Control',
-      timestamp: '2024-01-14T14:10:00Z',
-      description: 'Failed authentication attempts on admin portal.'
-    }
-  ];
-
-  const getSeverityColor = (severity) => {
-    switch (severity.toLowerCase()) {
-      case 'critical': return 'bg-red-600 text-white';
-      case 'high': return 'bg-orange-600 text-white';
-      case 'medium': return 'bg-yellow-600 text-white';
-      case 'low': return 'bg-blue-600 text-white';
-      default: return 'bg-gray-600 text-white';
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status.toLowerCase()) {
-      case 'open': return 'bg-red-100 text-red-800 border-red-200';
-      case 'in progress': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'resolved': return 'bg-green-100 text-green-800 border-green-200';
-      case 'closed': return 'bg-gray-100 text-gray-800 border-gray-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const formatTimestamp = (timestamp) => {
-    return new Date(timestamp).toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const filteredIncidents = incidents.filter(incident => {
-    const severityMatch = selectedSeverity === 'all' || incident.severity.toLowerCase() === selectedSeverity;
-    const statusMatch = selectedStatus === 'all' || incident.status.toLowerCase() === selectedStatus;
-    return severityMatch && statusMatch;
+  
+  // State management
+  const [ownedIncidents, setOwnedIncidents] = useState([]);
+  const [recentAlerts, setRecentAlerts] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState(null);
+  const [takingOwnership, setTakingOwnership] = useState(new Set());
+  
+  // Filters
+  const [alertFilters, setAlertFilters] = useState({
+    severity: 'all',
+    status: 'all',
+    search: ''
   });
+
+  // Initialize WebSocket connection and event listeners
+  useEffect(() => {
+    const initializeConnection = () => {
+      setIsLoading(true);
+      setError(null);
+
+      // Set up event listeners
+      incidentsAPI.on('initialDataReceived', handleInitialData);
+      incidentsAPI.on('recentAlertsReceived', handleRecentAlerts);
+      incidentsAPI.on('ownedIncidentsReceived', handleOwnedIncidents);
+      incidentsAPI.on('alertReceived', handleNewAlert);
+      incidentsAPI.on('alertUpdated', handleAlertUpdate);
+      incidentsAPI.on('incidentCreated', handleIncidentCreated);
+      incidentsAPI.on('incidentUpdated', handleIncidentUpdated);
+      incidentsAPI.on('ownershipTaken', handleOwnershipTaken);
+      incidentsAPI.on('websocketError', handleWebSocketError);
+      incidentsAPI.on('connectionFailed', handleConnectionFailed);
+
+      // Connect WebSocket
+      incidentsAPI.connectWebSocket();
+      setIsConnected(true);
+      setIsLoading(false);
+    };
+
+    initializeConnection();
+
+    // Cleanup on unmount
+    return () => {
+      incidentsAPI.off('initialDataReceived', handleInitialData);
+      incidentsAPI.off('recentAlertsReceived', handleRecentAlerts);
+      incidentsAPI.off('ownedIncidentsReceived', handleOwnedIncidents);
+      incidentsAPI.off('alertReceived', handleNewAlert);
+      incidentsAPI.off('alertUpdated', handleAlertUpdate);
+      incidentsAPI.off('incidentCreated', handleIncidentCreated);
+      incidentsAPI.off('incidentUpdated', handleIncidentUpdated);
+      incidentsAPI.off('ownershipTaken', handleOwnershipTaken);
+      incidentsAPI.off('websocketError', handleWebSocketError);
+      incidentsAPI.off('connectionFailed', handleConnectionFailed);
+      
+      incidentsAPI.disconnectWebSocket();
+    };
+  }, []);
+
+  // Event handlers
+  const handleInitialData = useCallback((data) => {
+    if (data.owned_incidents) {
+      setOwnedIncidents(data.owned_incidents);
+    }
+    setIsLoading(false);
+  }, []);
+
+  const handleRecentAlerts = useCallback((data) => {
+    setRecentAlerts(data.alerts || []);
+  }, []);
+
+  const handleOwnedIncidents = useCallback((data) => {
+    setOwnedIncidents(data.incidents || []);
+  }, []);
+
+  const handleNewAlert = useCallback((alert) => {
+    setRecentAlerts(prev => [alert, ...prev].slice(0, 50)); // Keep latest 50
+  }, []);
+
+  const handleAlertUpdate = useCallback((alert) => {
+    setRecentAlerts(prev => 
+      prev.map(a => a.id === alert.id ? alert : a)
+    );
+  }, []);
+
+  const handleIncidentCreated = useCallback((incident) => {
+    setOwnedIncidents(prev => [incident, ...prev]);
+  }, []);
+
+  const handleIncidentUpdated = useCallback((incident) => {
+    setOwnedIncidents(prev => 
+      prev.map(i => i.id === incident.id ? incident : i)
+    );
+  }, []);
+
+  const handleOwnershipTaken = useCallback((data) => {
+    if (data.success && data.incident) {
+      setOwnedIncidents(prev => [data.incident, ...prev]);
+      // Remove alert from recent alerts if it exists
+      setRecentAlerts(prev => 
+        prev.filter(alert => !data.incident.alert_ids?.includes(alert.id))
+      );
+    }
+    setTakingOwnership(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(data.alert_id);
+      return newSet;
+    });
+  }, []);
+
+  const handleWebSocketError = useCallback((error) => {
+    console.error('WebSocket error:', error);
+    setError(error.message);
+  }, []);
+
+  const handleConnectionFailed = useCallback((error) => {
+    setIsConnected(false);
+    setError('Connection to server failed. Some features may not work properly.');
+  }, []);
+
+  // Take ownership of an alert
+  const handleTakeOwnership = async (alert) => {
+    try {
+      setTakingOwnership(prev => new Set(prev).add(alert.id));
+      setError(null);
+      
+      await incidentsAPI.takeOwnership(alert.id);
+      // Success is handled by the WebSocket event
+      
+    } catch (error) {
+      console.error('Failed to take ownership:', error);
+      setError(`Failed to take ownership: ${error.message}`);
+      setTakingOwnership(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(alert.id);
+        return newSet;
+      });
+    }
+  };
+
+  // Trigger playbook for incident
+  const handleTriggerPlaybook = async (incident) => {
+    try {
+      // This would integrate with the playbook system
+      console.log('Triggering playbook for incident:', incident.incident_id);
+      // TODO: Implement playbook triggering
+      alert('Playbook triggering will be implemented in the next phase');
+    } catch (error) {
+      console.error('Failed to trigger playbook:', error);
+      setError(`Failed to trigger playbook: ${error.message}`);
+    }
+  };
+
+  // Filter alerts based on current filters
+  const filteredAlerts = recentAlerts.filter(alert => {
+    const severityMatch = alertFilters.severity === 'all' || 
+                         alert.severity?.toLowerCase() === alertFilters.severity;
+    const statusMatch = alertFilters.status === 'all' || 
+                       alert.status?.toLowerCase() === alertFilters.status;
+    const searchMatch = !alertFilters.search || 
+                       alert.title?.toLowerCase().includes(alertFilters.search.toLowerCase()) ||
+                       alert.description?.toLowerCase().includes(alertFilters.search.toLowerCase());
+    
+    return severityMatch && statusMatch && searchMatch;
+  });
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-cerberus-dark flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-cerberus-red mx-auto mb-4"></div>
+          <p className="text-white text-lg">Connecting to incident management system...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-cerberus-dark">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
         {/* Header */}
         <div className="mb-8 animate-fade-in">
-          <h1 className="text-3xl font-bold text-white mb-2">
-            Security Incidents
-          </h1>
-          <p className="text-gray-400">
-            Monitor and manage security incidents across your organization.
-          </p>
-        </div>
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="card-glass">
-            <div className="flex items-center">
-              <div className="p-3 bg-red-500/20 rounded-lg">
-                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">Total Incidents</p>
-                <p className="text-2xl font-bold text-white">{incidents.length}</p>
-              </div>
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-bold text-white mb-2">
+                Incident Management
+              </h1>
+              <p className="text-gray-400">
+                Monitor alerts and manage your security incidents in real-time.
+              </p>
             </div>
-          </div>
-
-          <div className="card-glass">
-            <div className="flex items-center">
-              <div className="p-3 bg-orange-500/20 rounded-lg">
-                <svg className="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">Open Incidents</p>
-                <p className="text-2xl font-bold text-white">
-                  {incidents.filter(i => i.status === 'Open').length}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="card-glass">
-            <div className="flex items-center">
-              <div className="p-3 bg-yellow-500/20 rounded-lg">
-                <svg className="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">In Progress</p>
-                <p className="text-2xl font-bold text-white">
-                  {incidents.filter(i => i.status === 'In Progress').length}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="card-glass">
-            <div className="flex items-center">
-              <div className="p-3 bg-green-500/20 rounded-lg">
-                <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">Resolved Today</p>
-                <p className="text-2xl font-bold text-white">
-                  {incidents.filter(i => i.status === 'Resolved').length}
-                </p>
+            <div className="flex items-center space-x-4">
+              {/* Connection Status */}
+              <div className="flex items-center">
+                <div className={`w-3 h-3 rounded-full mr-2 ${
+                  isConnected ? 'bg-green-500' : 'bg-red-500'
+                }`}></div>
+                <span className="text-sm text-gray-400">
+                  {isConnected ? 'Connected' : 'Disconnected'}
+                </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Filters and Actions */}
-        <div className="card-glass mb-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+        {/* Error Message */}
+        {error && (
+          <div className="mb-6 bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded-lg">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm">{error}</p>
+              </div>
+              <div className="ml-auto pl-3">
+                <button
+                  onClick={() => setError(null)}
+                  className="text-red-400 hover:text-red-300"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Owned Incidents Section */}
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold text-white mb-4">Your Active Incidents</h2>
+          
+          {ownedIncidents.length > 0 ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {ownedIncidents.map(incident => (
+                <div key={incident.id} className="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-white mb-1">
+                        {incident.incident_id}
+                      </h3>
+                      <p className="text-gray-300 text-sm line-clamp-2">
+                        {incident.title}
+                      </p>
+                    </div>
+                    <div className="flex flex-col space-y-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        incidentsAPI.getSeverityColor(incident.severity)
+                      }`}>
+                        {incident.severity?.toUpperCase()}
+                      </span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        incidentsAPI.getPriorityColor(incident.priority)
+                      }`}>
+                        {incident.priority?.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="mb-4">
+                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium border ${
+                      incidentsAPI.getStatusColor(incident.status)
+                    }`}>
+                      {incident.status?.replace('_', ' ').toUpperCase()}
+                    </span>
+                    {incidentsAPI.isIncidentOverdue(incident) && (
+                      <span className="ml-2 inline-flex px-2 py-1 rounded-full text-xs font-medium bg-red-600 text-white">
+                        OVERDUE
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-sm text-gray-400 mb-4">
+                    <p>Created: {incidentsAPI.formatTimestamp(incident.created_at)}</p>
+                    <p>Alerts: {incident.alert_count || incident.alert_ids?.length || 0}</p>
+                  </div>
+
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => handleTriggerPlaybook(incident)}
+                      className="flex-1 bg-cerberus-red hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                      Trigger Playbook
+                    </button>
+                    <button className="px-3 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors">
+                      View Details
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-gray-800 rounded-lg p-8 text-center border border-gray-700">
+              <div className="text-gray-400 mb-4">
+                <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium text-white mb-2">No Active Incidents</h3>
+              <p className="text-gray-400">You don't have any active incidents. Take ownership of alerts below to create incidents.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Recent Alerts Section */}
+        <div className="mb-8">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-white">Recent Alerts</h2>
+            <div className="flex space-x-4">
+              {/* Search */}
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Search alerts..."
+                  value={alertFilters.search}
+                  onChange={(e) => setAlertFilters(prev => ({ ...prev, search: e.target.value }))}
+                  className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
+                />
+                <svg className="absolute right-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+
+              {/* Severity Filter */}
               <select
-                value={selectedSeverity}
-                onChange={(e) => setSelectedSeverity(e.target.value)}
-                className="input-field"
+                value={alertFilters.severity}
+                onChange={(e) => setAlertFilters(prev => ({ ...prev, severity: e.target.value }))}
+                className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red"
               >
                 <option value="all">All Severities</option>
                 <option value="critical">Critical</option>
@@ -190,121 +344,226 @@ const Incidents = () => {
                 <option value="low">Low</option>
               </select>
 
+              {/* Status Filter */}
               <select
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
-                className="input-field"
+                value={alertFilters.status}
+                onChange={(e) => setAlertFilters(prev => ({ ...prev, status: e.target.value }))}
+                className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red"
               >
                 <option value="all">All Statuses</option>
-                <option value="open">Open</option>
-                <option value="in progress">In Progress</option>
-                <option value="resolved">Resolved</option>
-                <option value="closed">Closed</option>
+                <option value="new">New</option>
+                <option value="triaged">Triaged</option>
+                <option value="investigating">Investigating</option>
               </select>
             </div>
-
-            <button className="btn-primary">
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              Create Incident
-            </button>
           </div>
-        </div>
 
-        {/* Incidents Table */}
-        <div className="card-glass">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-left py-3 px-4 font-medium text-gray-300">Incident ID</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-300">Title</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-300">Severity</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-300">Status</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-300">Assignee</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-300">Source</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-300">Timestamp</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-300">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-700">
-                {filteredIncidents.map((incident) => (
-                  <tr key={incident.id} className="hover:bg-gray-700/30 transition-colors duration-200">
-                    <td className="py-3 px-4">
-                      <span className="font-mono text-sm text-cerberus-green">{incident.id}</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div>
-                        <div className="font-medium text-white">{incident.title}</div>
-                        <div className="text-sm text-gray-400">{incident.description}</div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getSeverityColor(incident.severity)}`}>
-                        {incident.severity}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getStatusColor(incident.status)}`}>
-                        {incident.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-gray-300">
-                      {incident.assignee}
-                    </td>
-                    <td className="py-3 px-4 text-gray-300">
-                      {incident.source}
-                    </td>
-                    <td className="py-3 px-4 text-gray-400 text-sm">
-                      {formatTimestamp(incident.timestamp)}
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex space-x-2">
-                        <button className="text-blue-400 hover:text-blue-300 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        </button>
-                        <button className="text-yellow-400 hover:text-yellow-300 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
-                        <button className="text-green-400 hover:text-green-300 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
+          {/* Alerts Table */}
+          <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-700">
+                <thead className="bg-gray-750">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                      Alert
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                      Severity
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                      Source
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                      Detected
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="bg-gray-800 divide-y divide-gray-700">
+                  {filteredAlerts.map((alert) => (
+                    <tr key={alert.id} className="hover:bg-gray-750 transition-colors">
+                      <td className="px-6 py-4">
+                        <div>
+                          <div className="text-sm font-medium text-white">
+                            {alert.title}
+                          </div>
+                          <div className="text-sm text-gray-400 line-clamp-2">
+                            {alert.description}
+                          </div>
+                          {alert.external_alert_id && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              ID: {alert.external_alert_id}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                          incidentsAPI.getSeverityColor(alert.severity)
+                        }`}>
+                          {alert.severity?.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium border ${
+                          incidentsAPI.getStatusColor(alert.status)
+                        }`}>
+                          {alert.status?.replace('_', ' ').toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                        {alert.source || 'Unknown'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                        {incidentsAPI.formatTimestamp(alert.detected_at || alert.received_at)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        {alert.assigned_analyst_id ? (
+                          <span className="text-gray-500">Assigned</span>
+                        ) : (
+                          <button
+                            onClick={() => handleTakeOwnership(alert)}
+                            disabled={takingOwnership.has(alert.id)}
+                            className={`inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white transition-colors ${
+                              takingOwnership.has(alert.id)
+                                ? 'bg-gray-600 cursor-not-allowed'
+                                : 'bg-cerberus-red hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cerberus-red'
+                            }`}
+                          >
+                            {takingOwnership.has(alert.id) ? (
+                              <>
+                                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Taking...
+                              </>
+                            ) : (
+                              'Take Ownership'
+                            )}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {filteredAlerts.length === 0 && (
+              <div className="text-center py-12">
+                <div className="text-gray-400 mb-4">
+                  <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-medium text-white mb-2">No alerts found</h3>
+                <p className="text-gray-400 mb-4">
+                  {alertFilters.search || alertFilters.severity !== 'all' || alertFilters.status !== 'all'
+                    ? 'No alerts match your current filters.'
+                    : 'No recent alerts available.'}
+                </p>
+                {(alertFilters.search || alertFilters.severity !== 'all' || alertFilters.status !== 'all') && (
+                  <button 
+                    onClick={() => setAlertFilters({ severity: 'all', status: 'all', search: '' })}
+                    className="inline-flex items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cerberus-red transition-colors"
+                  >
+                    Clear Filters
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          {filteredIncidents.length === 0 && (
-            <div className="text-center py-12">
-              <div className="text-gray-400 mb-4">
-                <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
+          {/* Live Updates Indicator */}
+          {isConnected && recentAlerts.length > 0 && (
+            <div className="mt-4 flex items-center justify-center text-sm text-gray-400">
+              <div className="flex items-center">
+                <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+                Live updates enabled - New alerts will appear automatically
               </div>
-              <h3 className="text-lg font-medium text-white mb-2">No incidents found</h3>
-              <p className="text-gray-400 mb-4">No incidents match your current filters.</p>
-              <button 
-                onClick={() => {
-                  setSelectedSeverity('all');
-                  setSelectedStatus('all');
-                }}
-                className="btn-secondary"
-              >
-                Clear Filters
-              </button>
             </div>
           )}
+        </div>
+
+        {/* Summary Statistics */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-cerberus-red rounded-lg flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-400">Active Incidents</p>
+                <p className="text-2xl font-semibold text-white">{ownedIncidents.length}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-yellow-600 rounded-lg flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-400">Unassigned Alerts</p>
+                <p className="text-2xl font-semibold text-white">
+                  {recentAlerts.filter(alert => !alert.assigned_analyst_id).length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-400">Critical Alerts</p>
+                <p className="text-2xl font-semibold text-white">
+                  {recentAlerts.filter(alert => alert.severity?.toLowerCase() === 'critical').length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  isConnected ? 'bg-green-600' : 'bg-red-600'
+                }`}>
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-400">Connection Status</p>
+                <p className="text-2xl font-semibold text-white">
+                  {isConnected ? 'Online' : 'Offline'}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
