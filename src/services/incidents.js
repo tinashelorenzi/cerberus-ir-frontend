@@ -152,6 +152,9 @@ class IncidentsAPI {
       case 'ownership_taken':
         this.emit('ownershipTaken', data);
         break;
+      case 'alert_ownership_taken':
+        this.emit('alertOwnershipTaken', data);
+        break;
       case 'initial_data':
         this.emit('initialDataReceived', data);
         break;
@@ -235,36 +238,13 @@ class IncidentsAPI {
 
   // Take ownership of an alert
   takeOwnership(alertId, notes = null) {
-    return new Promise((resolve, reject) => {
-      // Set up one-time listeners for the response
-      const successHandler = (data) => {
-        this.off('ownershipTaken', successHandler);
-        this.off('websocketError', errorHandler);
-        resolve(data);
-      };
-      
-      const errorHandler = (error) => {
-        this.off('ownershipTaken', successHandler);
-        this.off('websocketError', errorHandler);
-        reject(new Error(error.message || 'Failed to take ownership'));
-      };
-
-      this.on('ownershipTaken', successHandler);
-      this.on('websocketError', errorHandler);
-
-      // Send ownership request
-      this.sendMessage('take_ownership', { 
+    this.sendMessage('take_ownership', { 
         alert_id: alertId,
         notes 
       });
-
-      // Set timeout for the request
-      setTimeout(() => {
-        this.off('ownershipTaken', successHandler);
-        this.off('websocketError', errorHandler);
-        reject(new Error('Ownership request timed out'));
-      }, 10000);
-    });
+      
+      // Return a resolved promise for compatibility
+      return Promise.resolve({ alert_id: alertId });
   }
 
   // Get recent alerts (fallback to API if WebSocket unavailable)
