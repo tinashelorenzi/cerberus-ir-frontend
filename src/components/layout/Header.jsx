@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -8,6 +8,8 @@ const Header = () => {
   const location = useLocation();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isSIEMOpen, setIsSIEMOpen] = useState(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
 
   const handleLogout = async (logoutAll = false) => {
     setIsLoggingOut(true);
@@ -45,6 +47,29 @@ const Header = () => {
     return location.pathname === path;
   };
 
+  const isInSIEMSection = () => {
+    return ['/incidents', '/analytics', '/reports'].includes(location.pathname);
+  };
+
+  const isInAdminSection = () => {
+    return ['/endpoint-tokens', '/playbooks'].includes(location.pathname);
+  };
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isSIEMOpen || isAdminOpen) {
+        setIsSIEMOpen(false);
+        setIsAdminOpen(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [isSIEMOpen, isAdminOpen]);
+
   return (
     <header className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700/50 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -65,38 +90,111 @@ const Header = () => {
             >
               Dashboard
             </button>
-            <button
-              onClick={() => navigate('/incidents')}
-              className={`nav-link ${isActive('/incidents') ? 'nav-link-active' : ''}`}
-            >
-              Incidents
-            </button>
-            <button
-              onClick={() => navigate('/analytics')}
-              className={`nav-link ${isActive('/analytics') ? 'nav-link-active' : ''}`}
-            >
-              Analytics
-            </button>
-            <button
-              onClick={() => navigate('/reports')}
-              className={`nav-link ${isActive('/reports') ? 'nav-link-active' : ''}`}
-            >
-              Reports
-            </button>
-            <button
-              onClick={() => navigate('/endpoint-tokens')}
-              className={`nav-link ${isActive('/endpoint-tokens') ? 'nav-link-active' : ''}`}
-            >
-              Endpoint Tokens
-            </button>
-            {user?.role === 'admin' && (
-                <button
-                onClick={() => navigate('/playbooks')}
-                className={`nav-link ${isActive('/playbooks') ? 'nav-link-active' : ''}`}
+            
+            {/* SIEM Dropdown */}
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsSIEMOpen(!isSIEMOpen);
+                }}
+                className={`nav-link flex items-center space-x-1 ${isInSIEMSection() ? 'nav-link-active' : ''}`}
+              >
+                <span>SIEM</span>
+                <svg className={`w-4 h-4 transition-transform duration-200 ${isSIEMOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {isSIEMOpen && (
+                <div 
+                  className="absolute top-full left-0 mt-2 w-48 bg-gray-800 rounded-md shadow-lg py-1 z-10 border border-gray-700 animate-fade-in"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                    Playbooks Management
-                </button>
-            )}
+                  <button
+                    onClick={() => {
+                      navigate('/incidents');
+                      setIsSIEMOpen(false);
+                    }}
+                    className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-700/50 transition-colors ${
+                      isActive('/incidents') ? 'text-cerberus-green bg-gray-700/30' : 'text-gray-300'
+                    }`}
+                  >
+                    Incidents
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigate('/analytics');
+                      setIsSIEMOpen(false);
+                    }}
+                    className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-700/50 transition-colors ${
+                      isActive('/analytics') ? 'text-cerberus-green bg-gray-700/30' : 'text-gray-300'
+                    }`}
+                  >
+                    Analytics
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigate('/reports');
+                      setIsSIEMOpen(false);
+                    }}
+                    className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-700/50 transition-colors ${
+                      isActive('/reports') ? 'text-cerberus-green bg-gray-700/30' : 'text-gray-300'
+                    }`}
+                  >
+                    Reports
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Admin Dropdown */}
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsAdminOpen(!isAdminOpen);
+                }}
+                className={`nav-link flex items-center space-x-1 ${isInAdminSection() ? 'nav-link-active' : ''}`}
+              >
+                <span>Admin</span>
+                <svg className={`w-4 h-4 transition-transform duration-200 ${isAdminOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {isAdminOpen && (
+                <div 
+                  className="absolute top-full left-0 mt-2 w-48 bg-gray-800 rounded-md shadow-lg py-1 z-10 border border-gray-700 animate-fade-in"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => {
+                      navigate('/endpoint-tokens');
+                      setIsAdminOpen(false);
+                    }}
+                    className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-700/50 transition-colors ${
+                      isActive('/endpoint-tokens') ? 'text-cerberus-green bg-gray-700/30' : 'text-gray-300'
+                    }`}
+                  >
+                    Endpoint Tokens
+                  </button>
+                  {user?.role === 'admin' && (
+                    <button
+                      onClick={() => {
+                        navigate('/playbooks');
+                        setIsAdminOpen(false);
+                      }}
+                      className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-700/50 transition-colors ${
+                        isActive('/playbooks') ? 'text-cerberus-green bg-gray-700/30' : 'text-gray-300'
+                      }`}
+                    >
+                      Playbooks Management
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </nav>
 
           {/* User Profile */}
