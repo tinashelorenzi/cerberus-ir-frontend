@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import logo from '../../assets/images/logo.png';
 
 const Header = () => {
   const { user, logout } = useAuth();
@@ -76,10 +77,11 @@ const Header = () => {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <div className="flex items-center">
-            <div className="cerberus-logo text-2xl">
-              <span className="text-white">Cerberus</span>{' '}
-              <span className="text-brand">IR</span>
-            </div>
+            <img 
+              src={logo} 
+              alt="Cerberus IR Logo" 
+              className="h-10 w-auto object-contain"
+            />
           </div>
 
           {/* Navigation Links */}

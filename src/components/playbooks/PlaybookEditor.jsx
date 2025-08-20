@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import PlaybookAPI from '../../services/PlaybookAPI'; // Import the API service
 
-const PlaybookBuilder = ({ onSave, onCancel }) => {
+const PlaybookEditor = ({ playbook, onSave, onCancel }) => {
   const [playbookData, setPlaybookData] = useState({
     name: '',
     description: '',
@@ -18,6 +18,32 @@ const PlaybookBuilder = ({ onSave, onCancel }) => {
   const [currentTag, setCurrentTag] = useState('');
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
+
+  // Add this useEffect to populate data when editing
+  useEffect(() => {
+    if (playbook) {
+      setPlaybookData({
+        id: playbook.id,
+        name: playbook.name || '',
+        description: playbook.description || '',
+        estimated_duration_minutes: playbook.estimated_duration_minutes || 30,
+        tags: playbook.tags || [],
+        status: playbook.status || 'draft',
+        version: playbook.version || '1.0',
+        severity_levels: playbook.severity_levels || [],
+        alert_sources: playbook.alert_sources || [],
+        matching_criteria: playbook.matching_criteria || {},
+        report_template: playbook.report_template || '',
+        requires_approval: playbook.requires_approval || false,
+        auto_assign: playbook.auto_assign || false,
+        priority_score: playbook.priority_score || 5,
+        playbook_definition: {
+          metadata: playbook.playbook_definition?.metadata || {},
+          phases: playbook.playbook_definition?.phases || []
+        }
+      });
+    }
+  }, [playbook]);
 
   const validateForm = () => {
     const newErrors = {};
@@ -92,13 +118,17 @@ const PlaybookBuilder = ({ onSave, onCancel }) => {
         }
       };
 
-      // Use PlaybookAPI service instead of direct fetch
-      await PlaybookAPI.createPlaybook(playbookToSave);
+      // Use updatePlaybook for editing, createPlaybook for new
+      if (playbookData.id) {
+        await PlaybookAPI.updatePlaybook(playbookData.id, playbookToSave);
+      } else {
+        await PlaybookAPI.createPlaybook(playbookToSave);
+      }
       
       onSave();
     } catch (error) {
-      console.error('Error creating playbook:', error);
-      alert(`Failed to create playbook: ${error.message}`);
+      console.error('Error saving playbook:', error);
+      alert(`Failed to save playbook: ${error.message}`);
     } finally {
       setSaving(false);
     }
@@ -581,4 +611,4 @@ const PlaybookBuilder = ({ onSave, onCancel }) => {
   );
 };
 
-export default PlaybookBuilder;
+export default PlaybookEditor;

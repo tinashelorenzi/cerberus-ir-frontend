@@ -699,7 +699,17 @@ const Incidents = () => {
                        </div>
                        
                        <div className="flex justify-between items-center text-xs text-gray-400">
-                         <span>Steps: {playbook.steps?.length || 0}</span>
+                       <span>Steps: {(() => {
+  let totalSteps = 0;
+  if (playbook.playbook_definition?.phases) {
+    playbook.playbook_definition.phases.forEach(phase => {
+      if (phase.steps) {
+        totalSteps += phase.steps.length;
+      }
+    });
+  }
+  return totalSteps;
+})()}</span>
                          <span>Created: {new Date(playbook.created_at).toLocaleDateString()}</span>
                        </div>
                      </div>
