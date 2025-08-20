@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import incidentsAPI from '../services/incidents';
+import PlaybookAPI from '../services/PlaybookAPI';
 
 const Incidents = () => {
   const { user } = useAuth();
@@ -19,6 +20,13 @@ const Incidents = () => {
     status: 'all',
     search: ''
   });
+
+  // Playbook modal state
+  const [showPlaybookModal, setShowPlaybookModal] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState(null);
+  const [playbooks, setPlaybooks] = useState([]);
+  const [playbooksLoading, setPlaybooksLoading] = useState(false);
+  const [playbookSearch, setPlaybookSearch] = useState('');
 
   // Initialize WebSocket connection and event listeners
   useEffect(() => {
@@ -147,15 +155,51 @@ const Incidents = () => {
   // Trigger playbook for incident
   const handleTriggerPlaybook = async (incident) => {
     try {
-      // This would integrate with the playbook system
-      console.log('Triggering playbook for incident:', incident.incident_id);
-      // TODO: Implement playbook triggering
-      alert('Playbook triggering will be implemented in the next phase');
+      setSelectedIncident(incident);
+      setPlaybooksLoading(true);
+      setPlaybookSearch('');
+      
+      // Load active playbooks
+      const data = await PlaybookAPI.getPlaybooks({ 
+        status: 'active',
+        size: 100 // Get more playbooks for selection
+      });
+      
+      setPlaybooks(data.items || []);
+      setShowPlaybookModal(true);
+    } catch (error) {
+      console.error('Failed to load playbooks:', error);
+      setError(`Failed to load playbooks: ${error.message}`);
+    } finally {
+      setPlaybooksLoading(false);
+    }
+  };
+
+  // Select and trigger a playbook
+  const handleSelectPlaybook = async (playbook) => {
+    try {
+      // TODO: Implement actual playbook triggering
+      console.log('Triggering playbook:', playbook.id, 'for incident:', selectedIncident.incident_id);
+      
+      // For now, show a success message
+      alert(`Playbook "${playbook.name}" has been triggered for incident ${selectedIncident.incident_id}`);
+      
+      setShowPlaybookModal(false);
+      setSelectedIncident(null);
+      setPlaybooks([]);
     } catch (error) {
       console.error('Failed to trigger playbook:', error);
       setError(`Failed to trigger playbook: ${error.message}`);
     }
   };
+
+  // Filter playbooks based on search
+  const filteredPlaybooks = playbooks.filter(playbook => {
+    if (!playbookSearch) return true;
+    return playbook.name?.toLowerCase().includes(playbookSearch.toLowerCase()) ||
+           playbook.description?.toLowerCase().includes(playbookSearch.toLowerCase()) ||
+           playbook.tags?.some(tag => tag.toLowerCase().includes(playbookSearch.toLowerCase()));
+  });
 
   // Filter alerts based on current filters
   const filteredAlerts = recentAlerts.filter(alert => {
@@ -564,10 +608,135 @@ const Incidents = () => {
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-};
+                 </div>
+       </div>
+
+       {/* Playbook Selection Modal */}
+       {showPlaybookModal && (
+         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+           <div className="bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+             <div className="p-6">
+               <div className="flex items-center justify-between mb-6">
+                 <div>
+                   <h2 className="text-xl font-bold text-white">Select Playbook</h2>
+                   <p className="text-gray-400 text-sm mt-1">
+                     Choose a playbook to trigger for incident {selectedIncident?.incident_id}
+                   </p>
+                 </div>
+                 <button
+                   onClick={() => {
+                     setShowPlaybookModal(false);
+                     setSelectedIncident(null);
+                     setPlaybooks([]);
+                   }}
+                   className="text-gray-400 hover:text-white"
+                 >
+                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                   </svg>
+                 </button>
+               </div>
+
+               {/* Search */}
+               <div className="mb-6">
+                 <div className="relative">
+                   <input
+                     type="text"
+                     placeholder="Search playbooks..."
+                     value={playbookSearch}
+                     onChange={(e) => setPlaybookSearch(e.target.value)}
+                     className="w-full bg-gray-700 border border-gray-600 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
+                   />
+                   <svg className="absolute right-3 top-3.5 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                   </svg>
+                 </div>
+               </div>
+
+               {/* Playbooks Grid */}
+               {playbooksLoading ? (
+                 <div className="flex items-center justify-center py-12">
+                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cerberus-red"></div>
+                   <span className="ml-3 text-white">Loading playbooks...</span>
+                 </div>
+               ) : filteredPlaybooks.length > 0 ? (
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                   {filteredPlaybooks.map((playbook) => (
+                     <div
+                       key={playbook.id}
+                       className="bg-gray-700 rounded-lg p-4 border border-gray-600 hover:border-cerberus-red transition-colors cursor-pointer"
+                       onClick={() => handleSelectPlaybook(playbook)}
+                     >
+                       <div className="flex justify-between items-start mb-3">
+                         <h3 className="text-lg font-semibold text-white line-clamp-2">
+                           {playbook.name}
+                         </h3>
+                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                           playbook.status === 'active' ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'
+                         }`}>
+                           {playbook.status?.toUpperCase()}
+                         </span>
+                       </div>
+                       
+                       <p className="text-gray-300 text-sm mb-3 line-clamp-3">
+                         {playbook.description}
+                       </p>
+                       
+                       <div className="flex flex-wrap gap-1 mb-3">
+                         {playbook.tags?.slice(0, 3).map((tag, index) => (
+                           <span
+                             key={index}
+                             className="px-2 py-1 bg-gray-600 text-gray-300 text-xs rounded-full"
+                           >
+                             {tag}
+                           </span>
+                         ))}
+                         {playbook.tags?.length > 3 && (
+                           <span className="px-2 py-1 bg-gray-600 text-gray-300 text-xs rounded-full">
+                             +{playbook.tags.length - 3}
+                           </span>
+                         )}
+                       </div>
+                       
+                       <div className="flex justify-between items-center text-xs text-gray-400">
+                         <span>Steps: {playbook.steps?.length || 0}</span>
+                         <span>Created: {new Date(playbook.created_at).toLocaleDateString()}</span>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               ) : (
+                 <div className="text-center py-12">
+                   <div className="text-gray-400 mb-4">
+                     <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                     </svg>
+                   </div>
+                   <h3 className="text-lg font-medium text-white mb-2">
+                     {playbookSearch ? 'No playbooks found' : 'No active playbooks available'}
+                   </h3>
+                   <p className="text-gray-400 mb-4">
+                     {playbookSearch 
+                       ? 'No playbooks match your search criteria.'
+                       : 'There are no active playbooks available for selection.'
+                     }
+                   </p>
+                   {playbookSearch && (
+                     <button 
+                       onClick={() => setPlaybookSearch('')}
+                       className="inline-flex items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cerberus-red transition-colors"
+                     >
+                       Clear Search
+                     </button>
+                   )}
+                 </div>
+               )}
+             </div>
+           </div>
+         </div>
+       )}
+     </div>
+   );
+ };
 
 export default Incidents;
