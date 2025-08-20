@@ -4,6 +4,8 @@ import incidentsAPI from '../services/incidents';
 import PlaybookAPI from '../services/PlaybookAPI';
 import PlaybookFlow from './playbooks/PlaybookFlow';
 import FloatingToolbox from './common/FloatingToolbox';
+import IncidentDetailsModal from './common/IncidentDetailsModal';
+import AlertDetailsModal from './common/AlertDetailsModal';
 
 const Incidents = () => {
   const { user } = useAuth();
@@ -40,6 +42,12 @@ const Incidents = () => {
   const [selectedClosedIncident, setSelectedClosedIncident] = useState(null);
   const [closureDetails, setClosureDetails] = useState(null);
   const [loadingClosureDetails, setLoadingClosureDetails] = useState(false);
+  
+  // Modal states for incident and alert details
+  const [showIncidentDetailsModal, setShowIncidentDetailsModal] = useState(false);
+  const [selectedIncidentForDetails, setSelectedIncidentForDetails] = useState(null);
+  const [showAlertDetailsModal, setShowAlertDetailsModal] = useState(false);
+  const [selectedAlertForDetails, setSelectedAlertForDetails] = useState(null);
   
 
   
@@ -306,6 +314,18 @@ const Incidents = () => {
     }
   };
 
+  // Handler for viewing incident details
+  const handleViewIncidentDetails = (incident) => {
+    setSelectedIncidentForDetails(incident);
+    setShowIncidentDetailsModal(true);
+  };
+
+  // Handler for viewing alert details
+  const handleViewAlertDetails = (alert) => {
+    setSelectedAlertForDetails(alert);
+    setShowAlertDetailsModal(true);
+  };
+
   // Updated function to render action buttons
   const renderIncidentActions = (incident) => {
     if (isIncidentClosed(incident)) {
@@ -506,7 +526,10 @@ const Incidents = () => {
 
                   <div className="flex space-x-2">
                     {renderIncidentActions(incident)}
-                    <button className="px-3 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors">
+                    <button 
+                      onClick={() => handleViewIncidentDetails(incident)}
+                      className="px-3 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
+                    >
                       View Details
                     </button>
                   </div>
@@ -607,7 +630,16 @@ const Incidents = () => {
                 </thead>
                 <tbody className="bg-gray-800 divide-y divide-gray-700">
                   {filteredAlerts.map((alert) => (
-                    <tr key={alert.id} className="hover:bg-gray-750 transition-colors">
+                    <tr 
+                      key={alert.id} 
+                      className="hover:bg-gray-750 transition-colors cursor-pointer"
+                      onClick={(e) => {
+                        // Don't trigger if clicking on the Take Ownership button
+                        if (!e.target.closest('button')) {
+                          handleViewAlertDetails(alert);
+                        }
+                      }}
+                    >
                       <td className="px-6 py-4">
                         <div>
                           <div className="text-sm font-medium text-white">
@@ -1136,6 +1168,26 @@ const Incidents = () => {
             </div>
           </div>
         )}
+
+        {/* Incident Details Modal */}
+        <IncidentDetailsModal
+          incident={selectedIncidentForDetails}
+          isOpen={showIncidentDetailsModal}
+          onClose={() => {
+            setShowIncidentDetailsModal(false);
+            setSelectedIncidentForDetails(null);
+          }}
+        />
+
+        {/* Alert Details Modal */}
+        <AlertDetailsModal
+          alert={selectedAlertForDetails}
+          isOpen={showAlertDetailsModal}
+          onClose={() => {
+            setShowAlertDetailsModal(false);
+            setSelectedAlertForDetails(null);
+          }}
+        />
 
       <FloatingToolbox />
     </div>

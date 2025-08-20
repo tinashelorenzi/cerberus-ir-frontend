@@ -77,11 +77,16 @@ const Header = () => {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <div className="flex items-center">
-            <img 
-              src={logo} 
-              alt="Cerberus IR Logo" 
-              className="h-10 w-auto object-contain"
-            />
+            <div 
+              className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform duration-200 cursor-pointer border-2 border-gray-200"
+              onClick={() => navigate('/dashboard')}
+            >
+              <img 
+                src={logo} 
+                alt="Cerberus IR Logo" 
+                className="h-10 w-auto object-contain"
+              />
+            </div>
           </div>
 
           {/* Navigation Links */}
