@@ -579,6 +579,31 @@ class PlaybookFlowService {
     
     return icons[status] || '❓';
   }
+
+  /**
+ * Complete flow with status selection
+ */
+async completeFlowWithStatus(flowId, completionData) {
+    try {
+      const response = await fetch(
+        `${this.baseURL}/api/v1/incident-flows/${flowId}/complete`,
+        {
+          method: 'POST',
+          headers: this.getAuthHeaders(),
+          body: JSON.stringify({
+            final_report: completionData.finalReport,
+            alert_disposition: completionData.alertDisposition,
+            incident_status: completionData.incidentStatus
+          })
+        }
+      );
+  
+      return this.handleResponse(response);
+    } catch (error) {
+      console.error('Error completing flow with status:', error);
+      throw error;
+    }
+  }
 }
 
 export default new PlaybookFlowService();

@@ -143,12 +143,13 @@ const Incidents = () => {
       setTakingOwnership(prev => new Set(prev).add(alert.id));
       setError(null);
       
+      // This should now automatically update alert status to "investigating"
       await incidentsAPI.takeOwnership(alert.id);
-      // Success is handled by the WebSocket event
       
     } catch (error) {
       console.error('Failed to take ownership:', error);
       setError(`Failed to take ownership: ${error.message}`);
+    } finally {
       setTakingOwnership(prev => {
         const newSet = new Set(prev);
         newSet.delete(alert.id);
@@ -169,6 +170,7 @@ const Incidents = () => {
         status: 'active',
         size: 100 // Get more playbooks for selection
       });
+      setSelectedIncident(incident);
       
       setPlaybooks(data.items || []);
       setShowPlaybookModal(true);

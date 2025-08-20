@@ -23,6 +23,14 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
   const [closeIncident, setCloseIncident] = useState(true);
   const [closeAlert, setCloseAlert] = useState(true);
   const [committing, setCommitting] = useState(false);
+  
+  // Completion modal state
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [completionData, setCompletionData] = useState({
+    finalReport: '',
+    alertDisposition: 'resolved', // 'false_positive', 'resolved', 'closed'
+    incidentStatus: 'resolved' // 'resolved', 'closed'
+  });
 
   // Initialize flow on component mount
   useEffect(() => {
@@ -291,6 +299,35 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
     }
   };
 
+  const handleCompleteFlowWithStatus = async () => {
+    try {
+      setCommitting(true);
+      
+      await playbookFlowService.completeFlow(
+        flowData.flow_id, 
+        completionData.finalReport, 
+        completionData.incidentStatus === 'closed',
+        completionData.alertDisposition === 'closed'
+      );
+      
+      // Refresh to show completed status
+      await refreshSteps();
+      
+      setShowCompletionModal(false);
+      setCompletionData({
+        finalReport: '',
+        alertDisposition: 'resolved',
+        incidentStatus: 'resolved'
+      });
+      
+    } catch (err) {
+      console.error('Failed to complete flow:', err);
+      setError(`Failed to complete flow: ${err.message}`);
+    } finally {
+      setCommitting(false);
+    }
+  };
+
   // Check if flow is ready to commit
   const isFlowComplete = playbookFlowService.isFlowComplete(steps);
   const hasFailedSteps = playbookFlowService.hasFailedRequiredSteps(steps);
@@ -514,157 +551,90 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
     );
   };
 
-  const renderCommitModal = () => {
-    if (!showCommitModal) return null;
+  const renderCompletionModal = () => {
+    if (!showCompletionModal) return null;
 
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-        <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-white">Complete Incident Flow</h2>
-                <p className="text-gray-400 text-sm mt-1">
-                  Finalize the incident response process and update the incident status
-                </p>
-              </div>
-              <button
-                onClick={() => setShowCommitModal(false)}
-                className="text-gray-400 hover:text-white"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-gray-800 p-6 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <h2 className="text-xl font-bold text-white mb-4">Complete Playbook Flow</h2>
+          
+          {/* Progress Summary */}
+          <div className="mb-6 p-4 bg-gray-700 rounded-lg">
+            <h3 className="font-medium text-gray-300 mb-2">Flow Summary</h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>Completed: {steps.filter(s => s.status === 'completed').length}</div>
+              <div>Failed: {steps.filter(s => s.status === 'failed').length}</div>
             </div>
-
-            {/* Flow Summary */}
-            <div className="mb-6 p-4 bg-gray-700 rounded-lg">
-              <h3 className="font-medium text-white mb-3">Flow Summary</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-gray-400">Total Steps:</span>
-                  <span className="text-white ml-2">{steps.length}</span>
-                </div>
-                <div>
-                  <span className="text-gray-400">Completed:</span>
-                  <span className="text-green-400 ml-2">
-                    {steps.filter(s => s.status === 'completed').length}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-400">Skipped:</span>
-                  <span className="text-yellow-400 ml-2">
-                    {steps.filter(s => s.status === 'skipped').length}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-400">Failed:</span>
-                  <span className="text-red-400 ml-2">
-                    {steps.filter(s => s.status === 'failed').length}
-                  </span>
-                </div>
-              </div>
+            <div className="text-green-400 font-medium">
+              Progress: {Math.round(flowData?.progress_percentage || 0)}%
             </div>
+          </div>
 
-            {/* Warning for failed steps */}
-            {hasFailedSteps && (
-              <div className="mb-6 p-4 bg-red-900 border border-red-600 rounded-lg">
-                <div className="flex items-center">
-                  <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <h4 className="font-medium text-red-300">Warning: Failed Steps Detected</h4>
-                </div>
-                <p className="text-red-400 text-sm mt-1">
-                  Some required steps have failed. Please review before completing the flow.
-                </p>
-              </div>
-            )}
+          {/* Final Report */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Final Report *
+            </label>
+            <textarea
+              value={completionData.finalReport}
+              onChange={(e) => setCompletionData(prev => ({...prev, finalReport: e.target.value}))}
+              placeholder="Provide a summary of the incident response, findings, and recommendations..."
+              className="w-full bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-cerberus-red"
+              rows={4}
+              required
+            />
+          </div>
 
-            {/* Final Report */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Final Report / Summary
-              </label>
-              <textarea
-                value={finalReport}
-                onChange={(e) => setFinalReport(e.target.value)}
-                placeholder="Provide a summary of the incident response, key findings, and any recommendations..."
-                className="w-full bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
-                rows={6}
-              />
-              <p className="text-gray-400 text-xs mt-1">
-                This report will be attached to the incident record and can be used for post-incident review.
-              </p>
-            </div>
+          {/* Alert Disposition */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Alert Disposition *
+            </label>
+            <select
+              value={completionData.alertDisposition}
+              onChange={(e) => setCompletionData(prev => ({...prev, alertDisposition: e.target.value}))}
+              className="w-full bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-cerberus-red"
+            >
+              <option value="false_positive">False Positive</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
+            <p className="text-gray-400 text-xs mt-1">
+              How should this alert be classified?
+            </p>
+          </div>
 
-            {/* Close Options */}
-            <div className="mb-6 space-y-4">
-              <h3 className="text-sm font-medium text-gray-300">Resolution Actions</h3>
-              
-              <div className="space-y-3">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={closeIncident}
-                    onChange={(e) => setCloseIncident(e.target.checked)}
-                    className="mr-3 w-4 h-4 text-cerberus-red bg-gray-700 border-gray-600 rounded focus:ring-cerberus-red focus:ring-2"
-                  />
-                  <div>
-                    <span className="text-gray-300 font-medium">Close Incident</span>
-                    <p className="text-gray-400 text-sm">
-                      Mark the incident as resolved and close it permanently.
-                    </p>
-                  </div>
-                </label>
+          {/* Incident Status */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Incident Status *
+            </label>
+            <select
+              value={completionData.incidentStatus}
+              onChange={(e) => setCompletionData(prev => ({...prev, incidentStatus: e.target.value}))}
+              className="w-full bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-cerberus-red"
+            >
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
+          </div>
 
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={closeAlert}
-                    onChange={(e) => setCloseAlert(e.target.checked)}
-                    className="mr-3 w-4 h-4 text-cerberus-red bg-gray-700 border-gray-600 rounded focus:ring-cerberus-red focus:ring-2"
-                  />
-                  <div>
-                    <span className="text-gray-300 font-medium">Close Related Alert</span>
-                    <p className="text-gray-400 text-sm">
-                      Mark the originating alert as resolved and add resolution notes.
-                    </p>
-                  </div>
-                </label>
-              </div>
-
-              {(!closeIncident && !closeAlert) && (
-                <div className="p-3 bg-yellow-900 border border-yellow-600 rounded-lg">
-                  <div className="flex items-center">
-                    <svg className="w-4 h-4 text-yellow-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <p className="text-yellow-300 text-sm">
-                      No entities will be closed. Only the playbook flow will be marked as completed.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="flex justify-end space-x-3">
-              <button
-                onClick={() => setShowCommitModal(false)}
-                className="px-4 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCompleteFlow}
-                disabled={committing}
-                className="px-6 py-2 bg-cerberus-red hover:bg-red-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50"
-              >
-                {committing ? 'Committing...' : 'Complete Flow'}
-              </button>
-            </div>
+          {/* Actions */}
+          <div className="flex justify-end space-x-3">
+            <button
+              onClick={() => setShowCompletionModal(false)}
+              className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCompleteFlowWithStatus}
+              disabled={!completionData.finalReport.trim() || committing}
+              className="px-4 py-2 bg-cerberus-red text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              {committing ? 'Completing...' : 'Complete Flow'}
+            </button>
           </div>
         </div>
       </div>
@@ -1003,18 +973,18 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
                 </div>
               )}
 
-              {/* Commit Button - Show when flow is complete but not yet committed */}
-              {isFlowComplete && !['completed', 'cancelled'].includes(flowData?.status) && (
-                <button
-                  onClick={() => setShowCommitModal(true)}
-                  className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold rounded-lg shadow-lg transform hover:scale-105 transition-all duration-200"
-                >
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Commit & Close Flow
-                </button>
-              )}
+                             {/* Commit Button - Show when flow is complete but not yet committed */}
+               {isFlowComplete && !['completed', 'cancelled'].includes(flowData?.status) && (
+                 <button
+                   onClick={() => setShowCompletionModal(true)}
+                   className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold rounded-lg shadow-lg transform hover:scale-105 transition-all duration-200"
+                 >
+                   <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                   </svg>
+                   Complete Flow
+                 </button>
+               )}
               
               {/* Debug info for commit button - remove this later */}
               <div className="text-xs text-gray-400 p-2 bg-gray-800 rounded">
@@ -1045,8 +1015,8 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
       {/* User Input Modal */}
       {renderUserInputModal()}
 
-      {/* Commit Flow Modal */}
-      {renderCommitModal()}
+      {/* Completion Modal */}
+      {renderCompletionModal()}
     </div>
   );
 };
