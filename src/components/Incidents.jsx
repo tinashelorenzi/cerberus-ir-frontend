@@ -32,7 +32,8 @@ const Incidents = () => {
   // PlaybookFlow modal state
   const [showPlaybookFlow, setShowPlaybookFlow] = useState(false);
   const [selectedPlaybook, setSelectedPlaybook] = useState(null);
-
+  const [showResolvedIncidents, setShowResolvedIncidents] = useState(false);
+  
   // Initialize WebSocket connection and event listeners
   useEffect(() => {
     const initializeConnection = () => {
@@ -207,6 +208,19 @@ const Incidents = () => {
            playbook.tags?.some(tag => tag.toLowerCase().includes(playbookSearch.toLowerCase()));
   });
 
+  // UPDATE THE INCIDENT FILTERING (around line 200-250):
+  const filteredOwnedIncidents = ownedIncidents.filter(incident => {
+    // Status filter - only show open incidents unless toggle is enabled
+    if (!showResolvedIncidents) {
+      const openStatuses = ['new', 'investigating', 'in_progress', 'contained', 'active'];
+      const isOpen = openStatuses.includes(incident.status?.toLowerCase());
+      if (!isOpen) return false;
+    }
+    
+    // Apply other existing filters...
+    return true;
+  });
+
   // Filter alerts based on current filters
   const filteredAlerts = recentAlerts.filter(alert => {
     const severityMatch = alertFilters.severity === 'all' || 
@@ -256,6 +270,22 @@ const Incidents = () => {
                   {isConnected ? 'Connected' : 'Disconnected'}
                 </span>
               </div>
+              {/* NEW: Toggle for resolved incidents */}
+              <div className="flex items-center space-x-2">
+    <label className="text-sm text-gray-400">Show resolved:</label>
+    <button
+      onClick={() => setShowResolvedIncidents(!showResolvedIncidents)}
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:ring-offset-2 ${
+        showResolvedIncidents ? 'bg-cerberus-red' : 'bg-gray-600'
+      }`}
+    >
+      <span
+        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+          showResolvedIncidents ? 'translate-x-5' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  </div>
             </div>
           </div>
         </div>
@@ -288,11 +318,13 @@ const Incidents = () => {
 
         {/* Owned Incidents Section */}
         <div className="mb-8">
-          <h2 className="text-xl font-semibold text-white mb-4">Your Active Incidents</h2>
+          <h2 className="text-xl font-semibold text-white mb-4">
+            {showResolvedIncidents ? 'Your Incidents' : 'Your Active Incidents'}
+          </h2>
           
-          {ownedIncidents.length > 0 ? (
+          {filteredOwnedIncidents.length > 0 ? (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {ownedIncidents.map(incident => (
+              {filteredOwnedIncidents.map(incident => (
                 <div key={incident.id} className="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors">
                   <div className="flex justify-between items-start mb-3">
                     <div>
@@ -356,8 +388,15 @@ const Incidents = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-medium text-white mb-2">No Active Incidents</h3>
-              <p className="text-gray-400">You don't have any active incidents. Take ownership of alerts below to create incidents.</p>
+              <h3 className="text-lg font-medium text-white mb-2">
+                {showResolvedIncidents ? 'No Incidents Found' : 'No Active Incidents'}
+              </h3>
+              <p className="text-gray-400">
+                {showResolvedIncidents 
+                  ? 'You don\'t have any incidents matching the current filter.'
+                  : 'You don\'t have any active incidents. Take ownership of alerts below to create incidents.'
+                }
+              </p>
             </div>
           )}
         </div>
@@ -553,8 +592,10 @@ const Incidents = () => {
                 </div>
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">Active Incidents</p>
-                <p className="text-2xl font-semibold text-white">{ownedIncidents.length}</p>
+                <p className="text-sm font-medium text-gray-400">
+                  {showResolvedIncidents ? 'Total Incidents' : 'Active Incidents'}
+                </p>
+                <p className="text-2xl font-semibold text-white">{filteredOwnedIncidents.length}</p>
               </div>
             </div>
           </div>

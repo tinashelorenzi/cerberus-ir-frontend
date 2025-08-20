@@ -740,10 +740,6 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
                 }}
               ></div>
             </div>
-            {/* Debug info - remove this later */}
-            <div className="text-xs text-gray-400 mt-1">
-              Debug: {flowData.completed_steps}/{flowData.total_steps} steps = {flowData.progress_percentage}%
-            </div>
           </div>
         )}
 
@@ -916,99 +912,61 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
           </div>
         </div>
 
-        {/* Footer Actions */}
-        <div className="p-6 border-t border-gray-700">
-          <div className="flex justify-between items-center">
-            <div className="flex space-x-4">
-              {flowData?.status === 'in_progress' && (
-                <>
-                  <button
-                    onClick={() => playbookFlowService.pauseFlow(flowData.flow_id, 'Manual pause')}
-                    className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md text-sm transition-colors"
-                  >
-                    Pause Flow
-                  </button>
-                  <button
-                    onClick={() => playbookFlowService.cancelFlow(flowData.flow_id, 'Manual cancellation')}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm transition-colors"
-                  >
-                    Cancel Flow
-                  </button>
-                </>
-              )}
-              {flowData?.status === 'paused' && (
-                <button
-                  onClick={() => playbookFlowService.resumeFlow(flowData.flow_id)}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm transition-colors"
-                >
-                  Resume Flow
-                </button>
-              )}
-              
-              {/* Flow Status Messages */}
-              {flowData?.status === 'completed' && (
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2 px-4 py-2 bg-green-900 border border-green-600 rounded-md">
-                    <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="text-green-300 text-sm font-medium">Flow Completed Successfully</span>
-                  </div>
-                  
-                  {/* Test button to reset flow - for development only */}
-                  <button
-                    onClick={async () => {
-                      try {
-                        await playbookFlowService.updateFlowStatus(flowData.flow_id, 'in_progress');
-                        await refreshSteps();
-                      } catch (err) {
-                        console.error('Failed to reset flow:', err);
-                      }
-                    }}
-                    className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded text-xs transition-colors"
-                  >
-                    🔄 Reset for Testing
-                  </button>
-                </div>
-              )}
-
-                             {/* Commit Button - Show when flow is complete but not yet committed */}
-               {isFlowComplete && !['completed', 'cancelled'].includes(flowData?.status) && (
+                 {/* Footer Actions */}
+         <div className="p-6 border-t border-gray-700">
+           <div className="flex justify-between items-center">
+             <div className="flex space-x-4">
+               {flowData?.status === 'in_progress' && (
+                 <>
+                   <button
+                     onClick={() => playbookFlowService.pauseFlow(flowData.flow_id, 'Manual pause')}
+                     className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md text-sm transition-colors"
+                   >
+                     Pause Flow
+                   </button>
+                   <button
+                     onClick={() => playbookFlowService.cancelFlow(flowData.flow_id, 'Manual cancellation')}
+                     className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm transition-colors"
+                   >
+                     Cancel Flow
+                   </button>
+                 </>
+               )}
+               {flowData?.status === 'paused' && (
                  <button
-                   onClick={() => setShowCompletionModal(true)}
-                   className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold rounded-lg shadow-lg transform hover:scale-105 transition-all duration-200"
+                   onClick={() => playbookFlowService.resumeFlow(flowData.flow_id)}
+                   className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm transition-colors"
                  >
-                   <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                   </svg>
-                   Complete Flow
+                   Resume Flow
                  </button>
                )}
-              
-              {/* Debug info for commit button - remove this later */}
-              <div className="text-xs text-gray-400 p-2 bg-gray-800 rounded">
-                <div>Debug: isComplete={isFlowComplete.toString()}, flowStatus={flowData?.status}, steps={steps.length}</div>
-                <div>Commit conditions: {isFlowComplete ? '✅' : '❌'} Complete, {flowData?.status} Status</div>
-                <div>Step statuses: {steps.map(s => `${s.step_name}:${s.status}`).join(', ')}</div>
-              </div>
-            </div>
-            
-            <div className="flex space-x-3">
-              <button
-                onClick={refreshSteps}
-                className="px-4 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
-              >
-                Refresh
-              </button>
-              <button
-                onClick={onClose}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md text-sm transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+             </div>
+             
+             <div className="flex space-x-3">
+               <button
+                 onClick={refreshSteps}
+                 className="px-4 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
+               >
+                 Refresh
+               </button>
+               {flowData && (isFlowComplete || flowData.progress_percentage >= 100) && (
+                 <button
+                   onClick={() => setShowCompletionModal(true)}
+                   className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium transition-colors"
+                   disabled={committing}
+                 >
+                   {committing ? 'Completing...' : 'Complete Flow'}
+                 </button>
+               )}
+               <button
+                 onClick={onClose}
+                 className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md text-sm transition-colors"
+               >
+                 Close
+               </button>
+             </div>
+           </div>
+         </div>
       </div>
 
       {/* User Input Modal */}

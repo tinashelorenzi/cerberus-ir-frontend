@@ -286,7 +286,14 @@ class IncidentsAPI {
   // ===== INCIDENT METHODS =====
 
   // Get owned incidents
-  async getOwnedIncidents() {
+  async getOwnedIncidents(includeResolved = false) {
+    const params = {};
+    
+    // Add status filter if not including resolved
+    if (!includeResolved) {
+      params.status = 'new,investigating,in_progress,contained,active';
+    }
+    
     // Try WebSocket first
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       return new Promise((resolve, reject) => {
@@ -296,7 +303,7 @@ class IncidentsAPI {
         };
         
         this.on('ownedIncidentsReceived', handler);
-        this.sendMessage('get_owned_incidents', {});
+        this.sendMessage('get_owned_incidents', params);
         
         setTimeout(() => {
           this.off('ownedIncidentsReceived', handler);
@@ -304,13 +311,16 @@ class IncidentsAPI {
         }, 5000);
       });
     }
-
+  
     // Fallback to API
+    const searchParams = new URLSearchParams();
+    if (params.status) searchParams.append('status', params.status);
+    
     const response = await fetch(
-      `${this.baseURL}/api/v1/incidents/owned`,
+      `${this.baseURL}/api/v1/incidents/owned?${searchParams}`,
       { headers: this.getAuthHeaders() }
     );
-
+  
     const data = await this.handleResponse(response);
     return data.incidents || [];
   }
