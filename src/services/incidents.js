@@ -370,6 +370,23 @@ class IncidentsAPI {
     return this.handleResponse(response);
   }
 
+  async getIncidentClosureDetails(incidentId) {
+    try {
+      const response = await fetch(`${this.baseURL}/api/v1/incidents/${incidentId}/closure-details`, {
+        headers: this.getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching incident closure details:', error);
+      throw error;
+    }
+  }
+
   // Update incident
   async updateIncident(incidentId, updateData) {
     const response = await fetch(

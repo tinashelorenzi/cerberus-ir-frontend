@@ -34,6 +34,12 @@ const Incidents = () => {
   const [selectedPlaybook, setSelectedPlaybook] = useState(null);
   const [showResolvedIncidents, setShowResolvedIncidents] = useState(false);
   
+  // Add new state for closure details modal
+  const [showClosureModal, setShowClosureModal] = useState(false);
+  const [selectedClosedIncident, setSelectedClosedIncident] = useState(null);
+  const [closureDetails, setClosureDetails] = useState(null);
+  const [loadingClosureDetails, setLoadingClosureDetails] = useState(false);
+  
   // Initialize WebSocket connection and event listeners
   useEffect(() => {
     const initializeConnection = () => {
@@ -197,6 +203,61 @@ const Incidents = () => {
     } catch (error) {
       console.error('Failed to open playbook flow:', error);
       setError(`Failed to open playbook flow: ${error.message}`);
+    }
+  };
+
+  // Function to determine if incident is closed/resolved
+  const isIncidentClosed = (incident) => {
+    const closedStatuses = ['resolved', 'closed', 'false_positive'];
+    return closedStatuses.includes(incident.status?.toLowerCase());
+  };
+
+  // Function to handle viewing closure details
+  const handleViewClosureDetails = async (incident) => {
+    try {
+      setSelectedClosedIncident(incident);
+      setLoadingClosureDetails(true);
+      setShowClosureModal(true);
+      
+      // Fetch the closure details from the completed flow
+      const closureData = await incidentsAPI.getIncidentClosureDetails(incident.incident_id);
+      setClosureDetails(closureData);
+    } catch (error) {
+      console.error('Failed to load closure details:', error);
+      setError(`Failed to load closure details: ${error.message}`);
+    } finally {
+      setLoadingClosureDetails(false);
+    }
+  };
+
+  // Updated function to render action buttons
+  const renderIncidentActions = (incident) => {
+    if (isIncidentClosed(incident)) {
+      return (
+        <button
+          onClick={() => handleViewClosureDetails(incident)}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors"
+          title="View closure details"
+        >
+          <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          View Details
+        </button>
+      );
+    } else {
+      return (
+        <button
+          onClick={() => handleTriggerPlaybook(incident)}
+          className="bg-cerberus-red hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition-colors"
+          title="Trigger incident response playbook"
+        >
+          <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Trigger Playbook
+        </button>
+      );
     }
   };
 
@@ -368,12 +429,7 @@ const Incidents = () => {
                   </div>
 
                   <div className="flex space-x-2">
-                    <button
-                      onClick={() => handleTriggerPlaybook(incident)}
-                      className="flex-1 bg-cerberus-red hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors"
-                    >
-                      Trigger Playbook
-                    </button>
+                    {renderIncidentActions(incident)}
                     <button className="px-3 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors">
                       View Details
                     </button>
@@ -793,21 +849,219 @@ const Incidents = () => {
          </div>
        )}
 
-       {/* PlaybookFlow Modal */}
-       {showPlaybookFlow && selectedPlaybook && selectedIncident && (
-         <PlaybookFlow
-           playbook={selectedPlaybook}
-           incident={selectedIncident}
-           onClose={() => {
-             setShowPlaybookFlow(false);
-             setSelectedPlaybook(null);
-             setSelectedIncident(null);
-             setPlaybooks([]);
-           }}
-         />
-       )}
-     </div>
-   );
- };
+               {/* PlaybookFlow Modal */}
+        {showPlaybookFlow && selectedPlaybook && selectedIncident && (
+          <PlaybookFlow
+            playbook={selectedPlaybook}
+            incident={selectedIncident}
+            onClose={() => {
+              setShowPlaybookFlow(false);
+              setSelectedPlaybook(null);
+              setSelectedIncident(null);
+              setPlaybooks([]);
+            }}
+          />
+        )}
+
+        {/* Closure Details Modal */}
+        {showClosureModal && selectedClosedIncident && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden mx-4">
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                <div>
+                  <h2 className="text-xl font-bold text-white">Incident Closure Details</h2>
+                  <p className="text-gray-400 text-sm">
+                    {selectedClosedIncident.title} - {selectedClosedIncident.incident_id}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowClosureModal(false);
+                    setSelectedClosedIncident(null);
+                    setClosureDetails(null);
+                  }}
+                  className="text-gray-400 hover:text-white p-2"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                {loadingClosureDetails ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cerberus-red"></div>
+                    <span className="ml-3 text-gray-400">Loading closure details...</span>
+                  </div>
+                ) : closureDetails ? (
+                  <div className="space-y-6">
+                    {/* Incident Summary */}
+                    <div className="bg-gray-700 rounded-lg p-4">
+                      <h3 className="font-semibold text-white mb-3">Incident Summary</h3>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-400">Status:</span>
+                          <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${
+                            selectedClosedIncident.status === 'resolved' 
+                              ? 'bg-green-900 text-green-300'
+                              : selectedClosedIncident.status === 'false_positive'
+                              ? 'bg-yellow-900 text-yellow-300'
+                              : 'bg-gray-900 text-gray-300'
+                          }`}>
+                            {selectedClosedIncident.status?.toUpperCase() || 'N/A'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Severity:</span>
+                          <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${
+                            selectedClosedIncident.severity === 'critical' 
+                              ? 'bg-red-900 text-red-300'
+                              : selectedClosedIncident.severity === 'high'
+                              ? 'bg-orange-900 text-orange-300'
+                              : 'bg-gray-900 text-gray-300'
+                          }`}>
+                            {selectedClosedIncident.severity?.toUpperCase() || 'N/A'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Assigned to:</span>
+                          <span className="ml-2 text-white">{closureDetails.assigned_analyst || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Closed at:</span>
+                          <span className="ml-2 text-white">
+                            {closureDetails.completed_at ? new Date(closureDetails.completed_at).toLocaleString() : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Playbook Information */}
+                    {closureDetails.playbook_name && (
+                      <div className="bg-gray-700 rounded-lg p-4">
+                        <h3 className="font-semibold text-white mb-3">Playbook Used</h3>
+                        <div className="text-sm">
+                          <div className="text-white font-medium">{closureDetails.playbook_name}</div>
+                          {closureDetails.playbook_description && (
+                            <div className="text-gray-400 mt-1">{closureDetails.playbook_description}</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Investigation Steps */}
+                    {closureDetails.steps && closureDetails.steps.length > 0 && (
+                      <div className="bg-gray-700 rounded-lg p-4">
+                        <h3 className="font-semibold text-white mb-3">Investigation Steps</h3>
+                        <div className="space-y-3">
+                          {closureDetails.steps.map((step, index) => (
+                            <div key={index} className="border-l-2 border-gray-600 pl-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-medium text-white">{step.step_name}</h4>
+                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                  step.status === 'completed' 
+                                    ? 'bg-green-900 text-green-300'
+                                    : step.status === 'failed'
+                                    ? 'bg-red-900 text-red-300'
+                                    : 'bg-gray-900 text-gray-300'
+                                }`}>
+                                  {step.status?.toUpperCase()}
+                                </span>
+                              </div>
+                              {step.description && (
+                                <p className="text-gray-400 text-sm mt-1">{step.description}</p>
+                              )}
+                              {step.output_summary && (
+                                <div className="mt-2 p-2 bg-gray-800 rounded text-sm">
+                                  <span className="text-gray-400">Output: </span>
+                                  <span className="text-white">{step.output_summary}</span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* User Inputs */}
+                    {closureDetails.user_inputs && closureDetails.user_inputs.length > 0 && (
+                      <div className="bg-gray-700 rounded-lg p-4">
+                        <h3 className="font-semibold text-white mb-3">Analyst Inputs</h3>
+                        <div className="space-y-3">
+                          {closureDetails.user_inputs.map((input, index) => (
+                            <div key={index} className="bg-gray-800 rounded p-3">
+                              <div className="font-medium text-white">{input.field_name}</div>
+                              <div className="text-gray-400 text-sm mt-1">{input.value}</div>
+                              {input.created_at && (
+                                <div className="text-xs text-gray-500 mt-2">
+                                  {new Date(input.created_at).toLocaleString()}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Final Report */}
+                    {closureDetails.final_report && (
+                      <div className="bg-gray-700 rounded-lg p-4">
+                        <h3 className="font-semibold text-white mb-3">Final Report</h3>
+                        <div className="text-gray-300 whitespace-pre-wrap">
+                          {closureDetails.final_report}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Response Metrics */}
+                    {(closureDetails.time_to_containment || closureDetails.time_to_resolution) && (
+                      <div className="bg-gray-700 rounded-lg p-4">
+                        <h3 className="font-semibold text-white mb-3">Response Metrics</h3>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          {closureDetails.time_to_containment && (
+                            <div>
+                              <span className="text-gray-400">Time to Containment:</span>
+                              <span className="ml-2 text-white">{closureDetails.time_to_containment} minutes</span>
+                            </div>
+                          )}
+                          {closureDetails.time_to_resolution && (
+                            <div>
+                              <span className="text-gray-400">Time to Resolution:</span>
+                              <span className="ml-2 text-white">{closureDetails.time_to_resolution} minutes</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <div className="text-gray-400">No closure details available for this incident.</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-6 py-4 border-t border-gray-700 flex justify-end">
+                <button
+                  onClick={() => {
+                    setShowClosureModal(false);
+                    setSelectedClosedIncident(null);
+                    setClosureDetails(null);
+                  }}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
 export default Incidents;
