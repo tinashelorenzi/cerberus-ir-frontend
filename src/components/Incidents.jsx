@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import incidentsAPI from '../services/incidents';
 import PlaybookAPI from '../services/PlaybookAPI';
+import PlaybookFlow from './playbooks/PlaybookFlow';
 
 const Incidents = () => {
   const { user } = useAuth();
@@ -27,6 +28,10 @@ const Incidents = () => {
   const [playbooks, setPlaybooks] = useState([]);
   const [playbooksLoading, setPlaybooksLoading] = useState(false);
   const [playbookSearch, setPlaybookSearch] = useState('');
+  
+  // PlaybookFlow modal state
+  const [showPlaybookFlow, setShowPlaybookFlow] = useState(false);
+  const [selectedPlaybook, setSelectedPlaybook] = useState(null);
 
   // Initialize WebSocket connection and event listeners
   useEffect(() => {
@@ -178,18 +183,17 @@ const Incidents = () => {
   // Select and trigger a playbook
   const handleSelectPlaybook = async (playbook) => {
     try {
-      // TODO: Implement actual playbook triggering
-      console.log('Triggering playbook:', playbook.id, 'for incident:', selectedIncident.incident_id);
-      
-      // For now, show a success message
-      alert(`Playbook "${playbook.name}" has been triggered for incident ${selectedIncident.incident_id}`);
-      
+      // Close the playbook selection modal
       setShowPlaybookModal(false);
-      setSelectedIncident(null);
-      setPlaybooks([]);
+      
+      // Set the selected playbook and open the PlaybookFlow modal
+      setSelectedPlaybook(playbook);
+      setShowPlaybookFlow(true);
+      
+      console.log('Opening playbook flow for:', playbook.name, 'incident:', selectedIncident.incident_id);
     } catch (error) {
-      console.error('Failed to trigger playbook:', error);
-      setError(`Failed to trigger playbook: ${error.message}`);
+      console.error('Failed to open playbook flow:', error);
+      setError(`Failed to open playbook flow: ${error.message}`);
     }
   };
 
@@ -744,6 +748,20 @@ const Incidents = () => {
              </div>
            </div>
          </div>
+       )}
+
+       {/* PlaybookFlow Modal */}
+       {showPlaybookFlow && selectedPlaybook && selectedIncident && (
+         <PlaybookFlow
+           playbook={selectedPlaybook}
+           incident={selectedIncident}
+           onClose={() => {
+             setShowPlaybookFlow(false);
+             setSelectedPlaybook(null);
+             setSelectedIncident(null);
+             setPlaybooks([]);
+           }}
+         />
        )}
      </div>
    );
