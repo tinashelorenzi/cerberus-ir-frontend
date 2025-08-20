@@ -131,4 +131,9 @@
   .animate-slide-up {
     animation: slideUp 0.3s ease-out;
   }
+
+  /* Success notification */
+  .success-notification {
+    transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+  }
 }

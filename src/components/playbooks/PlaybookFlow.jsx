@@ -312,12 +312,31 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
       // Refresh to show completed status
       await refreshSteps();
       
+      // Close the completion modal
       setShowCompletionModal(false);
       setCompletionData({
         finalReport: '',
         alertDisposition: 'resolved',
         incidentStatus: 'resolved'
       });
+      
+      // Show success message
+      setError(null);
+      
+      // Close the entire playbook flow modal after a short delay
+      setTimeout(() => {
+        onClose(); // This will close the PlaybookFlow modal
+        
+        // Optionally show a success toast/notification
+        if (window.showSuccessNotification) {
+          window.showSuccessNotification('Incident response completed successfully!');
+        }
+        
+        // Trigger websocket refresh of incidents page
+        if (window.refreshIncidentsFromWebSocket) {
+          window.refreshIncidentsFromWebSocket();
+        }
+      }, 1000);
       
     } catch (err) {
       console.error('Failed to complete flow:', err);

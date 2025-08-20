@@ -28,6 +28,46 @@ const config = {
   
     // Token expiry buffer (refresh token 5 minutes before expiry)
     TOKEN_REFRESH_BUFFER: 5 * 60 * 1000, // 5 minutes in milliseconds
+
+    // External tools configuration
+    EXTERNAL_TOOLS: [
+      {
+        name: 'OneView Threatdown',
+        url: 'https://oneview.threatdown.com',
+        icon: 'fas fa-shield-alt',
+        type: 'threat_intelligence'
+      },
+      {
+        name: 'FortiGate',
+        url: 'https://fortigate.company.com',
+        icon: 'fas fa-fire',
+        type: 'firewall'
+      },
+      {
+        name: 'VirusTotal',
+        url: 'https://www.virustotal.com',
+        icon: 'fas fa-virus-slash',
+        type: 'malware_analysis'
+      },
+      {
+        name: 'AlienVault OTX',
+        url: 'https://otx.alienvault.com',
+        icon: 'fas fa-search',
+        type: 'threat_intelligence'
+      },
+      {
+        name: 'CrowdStrike',
+        url: 'https://falcon.crowdstrike.com',
+        icon: 'fas fa-eye',
+        type: 'edr'
+      },
+      {
+        name: 'Splunk',
+        url: 'https://splunk.company.com',
+        icon: 'fas fa-chart-line',
+        type: 'siem'
+      }
+    ]
   };
   
   export default config;
