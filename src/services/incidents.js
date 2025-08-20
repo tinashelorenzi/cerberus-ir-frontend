@@ -442,6 +442,16 @@ class IncidentsAPI {
     return this.handleResponse(response);
   }
 
+  // Get alert details by ID
+  async getAlert(alertId) {
+    const response = await fetch(
+      `${this.baseURL}/api/v1/incidents/alerts/${alertId}`,
+      { headers: this.getAuthHeaders() }
+    );
+
+    return this.handleResponse(response);
+  }
+
   // Watch specific incident for updates
   watchIncident(incidentId) {
     this.sendMessage('watch_incident', { incident_id: incidentId });

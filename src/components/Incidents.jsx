@@ -326,6 +326,27 @@ const Incidents = () => {
     setShowAlertDetailsModal(true);
   };
 
+  // Handler for viewing alert details from incident modal
+  const handleViewAlertFromIncident = async (alertId) => {
+    try {
+      // Try to find the alert in recent alerts first
+      const existingAlert = recentAlerts.find(alert => alert.id === alertId);
+      if (existingAlert) {
+        setSelectedAlertForDetails(existingAlert);
+        setShowAlertDetailsModal(true);
+        return;
+      }
+
+      // If not found in recent alerts, fetch it from the API
+      const alertDetails = await incidentsAPI.getAlert(alertId);
+      setSelectedAlertForDetails(alertDetails);
+      setShowAlertDetailsModal(true);
+    } catch (error) {
+      console.error('Failed to fetch alert details:', error);
+      setError(`Failed to load alert details: ${error.message}`);
+    }
+  };
+
   // Updated function to render action buttons
   const renderIncidentActions = (incident) => {
     if (isIncidentClosed(incident)) {
@@ -479,63 +500,94 @@ const Incidents = () => {
             {showResolvedIncidents ? 'Your Incidents' : 'Your Active Incidents'}
           </h2>
           
-          {filteredOwnedIncidents.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredOwnedIncidents.map(incident => (
-                <div key={incident.id} className="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="text-lg font-semibold text-white mb-1">
-                        {incident.incident_id}
-                      </h3>
-                      <p className="text-gray-300 text-sm line-clamp-2">
-                        {incident.title}
-                      </p>
+                     {filteredOwnedIncidents.length > 0 ? (
+             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+               {filteredOwnedIncidents.map((incident, index) => (
+                                   <div key={incident.incident_id || index} className="bg-gray-750 rounded-lg border border-gray-700 p-4 hover:border-gray-600 transition-colors">
+                    {/* Header with title and badges */}
+                    <div className="flex flex-col space-y-3 mb-3">
+                      <div className="flex items-start justify-between">
+                        <h3 className="text-white font-medium text-lg flex-1 mr-3">
+                          {incident.title || `Incident #${incident.incident_id}`}
+                        </h3>
+                        <div className="flex items-center space-x-2 flex-shrink-0">
+                          <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                            incidentsAPI.getSeverityColor(incident.severity)
+                          }`}>
+                            {incident.severity?.toUpperCase()}
+                          </span>
+                          <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium border ${
+                            incidentsAPI.getStatusColor(incident.status)
+                          }`}>
+                            {incident.status?.replace('_', ' ').toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Action buttons */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          {!isIncidentClosed(incident) && (
+                            <>
+                              <button
+                                onClick={() => handleViewIncidentDetails(incident)}
+                                className="flex items-center space-x-1 text-gray-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-gray-700"
+                                title="View Details"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                                <span className="text-sm">View Details</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center space-x-2">
+                          {!isIncidentClosed(incident) && (
+                            <button
+                              onClick={() => handleTriggerPlaybook(incident)}
+                              className="bg-cerberus-red hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm transition-colors flex items-center space-x-1"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                              </svg>
+                              <span>Run Playbook</span>
+                            </button>
+                          )}
+                          
+                          {isIncidentClosed(incident) && (
+                            <button
+                              onClick={() => handleViewClosureDetails(incident)}
+                              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm transition-colors flex items-center space-x-1"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              <span>View Closure</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex flex-col space-y-2">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        incidentsAPI.getSeverityColor(incident.severity)
-                      }`}>
-                        {incident.severity?.toUpperCase()}
-                      </span>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        incidentsAPI.getPriorityColor(incident.priority)
-                      }`}>
-                        {incident.priority?.toUpperCase()}
-                      </span>
+                    
+                    {/* Metadata */}
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-gray-400 mb-3">
+                      <span className="bg-gray-800 px-2 py-1 rounded">ID: {incident.incident_id}</span>
+                      <span className="bg-gray-800 px-2 py-1 rounded">Created: {incidentsAPI.formatTimestamp(incident.created_at)}</span>
+                      {incident.alert_count && (
+                        <span className="bg-gray-800 px-2 py-1 rounded">{incident.alert_count} alert{incident.alert_count !== 1 ? 's' : ''}</span>
+                      )}
                     </div>
-                  </div>
-                  
-                  <div className="mb-4">
-                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium border ${
-                      incidentsAPI.getStatusColor(incident.status)
-                    }`}>
-                      {incident.status?.replace('_', ' ').toUpperCase()}
-                    </span>
-                    {incidentsAPI.isIncidentOverdue(incident) && (
-                      <span className="ml-2 inline-flex px-2 py-1 rounded-full text-xs font-medium bg-red-600 text-white">
-                        OVERDUE
-                      </span>
+                    
+                    {/* Description */}
+                    {incident.description && (
+                      <p className="text-gray-300 text-sm line-clamp-2 bg-gray-800 p-3 rounded">{incident.description}</p>
                     )}
                   </div>
-
-                  <div className="text-sm text-gray-400 mb-4">
-                    <p>Created: {incidentsAPI.formatTimestamp(incident.created_at)}</p>
-                    <p>Alerts: {incident.alert_count || incident.alert_ids?.length || 0}</p>
-                  </div>
-
-                  <div className="flex space-x-2">
-                    {renderIncidentActions(incident)}
-                    <button 
-                      onClick={() => handleViewIncidentDetails(incident)}
-                      className="px-3 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
-                    >
-                      View Details
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+               ))}
+             </div>
           ) : (
             <div className="bg-gray-800 rounded-lg p-8 text-center border border-gray-700">
               <div className="text-gray-400 mb-4">
@@ -556,193 +608,155 @@ const Incidents = () => {
           )}
         </div>
 
-        {/* Recent Alerts Section */}
-        <div className="mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-white">Recent Alerts</h2>
-            <div className="flex space-x-4">
-              {/* Search */}
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search alerts..."
-                  value={alertFilters.search}
-                  onChange={(e) => setAlertFilters(prev => ({ ...prev, search: e.target.value }))}
-                  className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
-                />
-                <svg className="absolute right-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
+                 {/* Recent Alerts Section */}
+         <div className="mb-8">
+           <div className="flex justify-between items-center mb-4">
+             <h2 className="text-xl font-semibold text-white">Recent Alerts</h2>
+             <div className="flex space-x-4">
+               {/* Search */}
+               <div className="relative">
+                 <input
+                   type="text"
+                   placeholder="Search alerts..."
+                   value={alertFilters.search}
+                   onChange={(e) => setAlertFilters(prev => ({ ...prev, search: e.target.value }))}
+                   className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
+                 />
+                 <svg className="absolute right-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                 </svg>
+               </div>
 
-              {/* Severity Filter */}
-              <select
-                value={alertFilters.severity}
-                onChange={(e) => setAlertFilters(prev => ({ ...prev, severity: e.target.value }))}
-                className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red"
-              >
-                <option value="all">All Severities</option>
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
+               {/* Severity Filter */}
+               <select
+                 value={alertFilters.severity}
+                 onChange={(e) => setAlertFilters(prev => ({ ...prev, severity: e.target.value }))}
+                 className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red"
+               >
+                 <option value="all">All Severities</option>
+                 <option value="critical">Critical</option>
+                 <option value="high">High</option>
+                 <option value="medium">Medium</option>
+                 <option value="low">Low</option>
+               </select>
 
-              {/* Status Filter */}
-              <select
-                value={alertFilters.status}
-                onChange={(e) => setAlertFilters(prev => ({ ...prev, status: e.target.value }))}
-                className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red"
-              >
-                <option value="all">All Statuses</option>
-                <option value="new">New</option>
-                <option value="triaged">Triaged</option>
-                <option value="investigating">Investigating</option>
-              </select>
-            </div>
-          </div>
+               {/* Status Filter */}
+               <select
+                 value={alertFilters.status}
+                 onChange={(e) => setAlertFilters(prev => ({ ...prev, status: e.target.value }))}
+                 className="bg-gray-800 border border-gray-600 text-white px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cerberus-red"
+               >
+                 <option value="all">All Statuses</option>
+                 <option value="new">New</option>
+                 <option value="triaged">Triaged</option>
+                 <option value="investigating">Investigating</option>
+               </select>
+             </div>
+           </div>
 
-          {/* Alerts Table */}
-          <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-700">
-                <thead className="bg-gray-750">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Alert
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Severity
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Source
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Detected
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-gray-800 divide-y divide-gray-700">
-                  {filteredAlerts.map((alert) => (
-                    <tr 
-                      key={alert.id} 
-                      className="hover:bg-gray-750 transition-colors cursor-pointer"
-                      onClick={(e) => {
-                        // Don't trigger if clicking on the Take Ownership button
-                        if (!e.target.closest('button')) {
-                          handleViewAlertDetails(alert);
-                        }
-                      }}
-                    >
-                      <td className="px-6 py-4">
-                        <div>
-                          <div className="text-sm font-medium text-white">
-                            {alert.title}
-                          </div>
-                          <div className="text-sm text-gray-400 line-clamp-2">
-                            {alert.description}
-                          </div>
-                          {alert.external_alert_id && (
-                            <div className="text-xs text-gray-500 mt-1">
-                              ID: {alert.external_alert_id}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                          incidentsAPI.getSeverityColor(alert.severity)
-                        }`}>
-                          {alert.severity?.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium border ${
-                          incidentsAPI.getStatusColor(alert.status)
-                        }`}>
-                          {alert.status?.replace('_', ' ').toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        {alert.source || 'Unknown'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        {incidentsAPI.formatTimestamp(alert.detected_at || alert.received_at)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        {alert.assigned_analyst_id ? (
-                          <span className="text-gray-500">Assigned</span>
-                        ) : (
-                          <button
-                            onClick={() => handleTakeOwnership(alert)}
-                            disabled={takingOwnership.has(alert.id)}
-                            className={`inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white transition-colors ${
-                              takingOwnership.has(alert.id)
-                                ? 'bg-gray-600 cursor-not-allowed'
-                                : 'bg-cerberus-red hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cerberus-red'
-                            }`}
-                          >
-                            {takingOwnership.has(alert.id) ? (
-                              <>
-                                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Taking...
-                              </>
-                            ) : (
-                              'Take Ownership'
-                            )}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+           {/* Enhanced Alerts Display */}
+           <div className="bg-gray-800 rounded-lg shadow-md p-6">
+             <div className="space-y-3">
+               {filteredAlerts.map((alert, index) => (
+                 <div
+                   key={alert.id || index}
+                   className="flex items-center justify-between p-4 bg-gray-750 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-gray-600 transition-all duration-200 cursor-pointer group"
+                   onClick={() => handleViewAlertDetails(alert)}
+                 >
+                   <div className="flex items-center space-x-4 flex-1">
+                     <div className={`w-2 h-2 rounded-full ${incidentsAPI.getSeverityColor(alert.severity).split(' ')[0]}`}></div>
+                     
+                     <div className="flex-1 min-w-0">
+                       <div className="flex items-center space-x-2">
+                         <h3 className="text-white font-medium truncate group-hover:text-gray-100 transition-colors">
+                           {alert.title}
+                         </h3>
+                         <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                           incidentsAPI.getSeverityColor(alert.severity)
+                         }`}>
+                           {alert.severity?.toUpperCase()}
+                         </span>
+                         <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium border ${
+                           incidentsAPI.getStatusColor(alert.status)
+                         }`}>
+                           {alert.status?.replace('_', ' ').toUpperCase()}
+                         </span>
+                       </div>
+                       
+                       <div className="flex items-center space-x-4 mt-1 text-sm text-gray-400">
+                         <span>Source: {alert.source || 'Unknown'}</span>
+                         <span>•</span>
+                         <span>{incidentsAPI.formatTimestamp(alert.received_at || alert.detected_at)}</span>
+                         {alert.assigned_analyst_id && (
+                           <>
+                             <span>•</span>
+                             <span>Analyst: {alert.assigned_analyst_id}</span>
+                           </>
+                         )}
+                       </div>
+                     </div>
+                   </div>
 
-            {filteredAlerts.length === 0 && (
-              <div className="text-center py-12">
-                <div className="text-gray-400 mb-4">
-                  <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-medium text-white mb-2">No alerts found</h3>
-                <p className="text-gray-400 mb-4">
-                  {alertFilters.search || alertFilters.severity !== 'all' || alertFilters.status !== 'all'
-                    ? 'No alerts match your current filters.'
-                    : 'No recent alerts available.'}
-                </p>
-                {(alertFilters.search || alertFilters.severity !== 'all' || alertFilters.status !== 'all') && (
-                  <button 
-                    onClick={() => setAlertFilters({ severity: 'all', status: 'all', search: '' })}
-                    className="inline-flex items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cerberus-red transition-colors"
-                  >
-                    Clear Filters
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+                   <div className="flex items-center space-x-2 ml-4">
+                     {alert.status === 'new' && (
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           handleTakeOwnership(alert);
+                         }}
+                         disabled={takingOwnership.has(alert.id)}
+                         className="bg-cerberus-red hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded text-sm transition-colors"
+                       >
+                         {takingOwnership.has(alert.id) ? (
+                           <div className="flex items-center space-x-1">
+                             <div className="animate-spin rounded-full h-3 w-3 border border-white border-t-transparent"></div>
+                             <span>Taking...</span>
+                           </div>
+                         ) : (
+                           'Take Ownership'
+                         )}
+                       </button>
+                     )}
+                     
+                     <button
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         handleViewAlertDetails(alert);
+                       }}
+                       className="text-gray-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                     >
+                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                       </svg>
+                     </button>
+                   </div>
+                 </div>
+               ))}
+             </div>
 
-          {/* Live Updates Indicator */}
-          {isConnected && recentAlerts.length > 0 && (
-            <div className="mt-4 flex items-center justify-center text-sm text-gray-400">
-              <div className="flex items-center">
-                <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-                Live updates enabled - New alerts will appear automatically
-              </div>
-            </div>
-          )}
-        </div>
+             {filteredAlerts.length === 0 && (
+               <div className="text-center py-8">
+                 <div className="text-gray-400 mb-2">
+                   <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2M4 13h2m0 0V9a2 2 0 012-2h2m0 0V6a2 2 0 012-2h2.09M9 9h1" />
+                   </svg>
+                 </div>
+                 <p className="text-gray-400">No recent alerts to display</p>
+               </div>
+             )}
+           </div>
+
+           {/* Live Updates Indicator */}
+           {isConnected && recentAlerts.length > 0 && (
+             <div className="mt-4 flex items-center justify-center text-sm text-gray-400">
+               <div className="flex items-center">
+                 <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+                 Live updates enabled - New alerts will appear automatically
+               </div>
+             </div>
+           )}
+         </div>
 
         {/* Summary Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -1177,6 +1191,7 @@ const Incidents = () => {
             setShowIncidentDetailsModal(false);
             setSelectedIncidentForDetails(null);
           }}
+          onViewAlert={handleViewAlertFromIncident}
         />
 
         {/* Alert Details Modal */}

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import incidentsAPI from '../../services/incidents';
+import { useAuth } from '../../contexts/AuthContext';
 
-const IncidentDetailsModal = ({ incident, isOpen, onClose }) => {
+const IncidentDetailsModal = ({ incident, isOpen, onClose, onViewAlert }) => {
+  const { user } = useAuth();
   const [incidentDetails, setIncidentDetails] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -13,13 +15,15 @@ const IncidentDetailsModal = ({ incident, isOpen, onClose }) => {
   }, [isOpen, incident]);
 
   const fetchIncidentDetails = async () => {
-    if (!incident?.id) return;
+    // Fix: Use incident_id instead of id
+    if (!incident?.incident_id) return;
     
     setLoading(true);
     setError(null);
     
     try {
-      const details = await incidentsAPI.getIncident(incident.id);
+      // Fix: Use the correct incident ID field
+      const details = await incidentsAPI.getIncident(incident.incident_id);
       setIncidentDetails(details);
     } catch (err) {
       setError(err.message);
@@ -78,6 +82,10 @@ const IncidentDetailsModal = ({ incident, isOpen, onClose }) => {
                   <h3 className="text-lg font-medium text-white mb-4">Basic Information</h3>
                   <div className="space-y-3">
                     <div>
+                      <label className="text-sm text-gray-400">Incident ID</label>
+                      <p className="text-white font-medium">{incidentDetails.incident_id}</p>
+                    </div>
+                    <div>
                       <label className="text-sm text-gray-400">Title</label>
                       <p className="text-white font-medium">{incidentDetails.title}</p>
                     </div>
@@ -101,12 +109,29 @@ const IncidentDetailsModal = ({ incident, isOpen, onClose }) => {
                         {incidentDetails.severity?.toUpperCase()}
                       </span>
                     </div>
+                    <div>
+                      <label className="text-sm text-gray-400">Priority</label>
+                      <p className="text-white">{incidentDetails.priority || 'Not set'}</p>
+                    </div>
                   </div>
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-medium text-white mb-4">Timeline</h3>
+                  <h3 className="text-lg font-medium text-white mb-4">Assignment & Timeline</h3>
                   <div className="space-y-3">
+                    <div>
+                      <label className="text-sm text-gray-400">Owner</label>
+                      <p className="text-white">{incidentDetails.owner_id ? `User #${incidentDetails.owner_id}` : 'Unassigned'}</p>
+                    </div>
+                                         <div>
+                       <label className="text-sm text-gray-400">Assigned Analyst</label>
+                       <p className="text-white">
+                         {incidentDetails.assigned_analyst_id 
+                           ? `Analyst #${incidentDetails.assigned_analyst_id}` 
+                           : user?.full_name || user?.username || 'Current User'
+                         }
+                       </p>
+                     </div>
                     <div>
                       <label className="text-sm text-gray-400">Created</label>
                       <p className="text-white">{incidentsAPI.formatTimestamp(incidentDetails.created_at)}</p>
@@ -123,47 +148,26 @@ const IncidentDetailsModal = ({ incident, isOpen, onClose }) => {
                         <p className="text-white">{incidentsAPI.formatTimestamp(incidentDetails.resolved_at)}</p>
                       </div>
                     )}
-                    {incidentDetails.closed_at && (
-                      <div>
-                        <label className="text-sm text-gray-400">Closed</label>
-                        <p className="text-white">{incidentsAPI.formatTimestamp(incidentDetails.closed_at)}</p>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
 
               {/* SLA Information */}
-              {(incidentDetails.response_sla_deadline || incidentDetails.resolution_sla_deadline) && (
+              {incidentDetails.resolution_sla_deadline && (
                 <div>
                   <h3 className="text-lg font-medium text-white mb-4">SLA Information</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {incidentDetails.response_sla_deadline && (
-                      <div>
-                        <label className="text-sm text-gray-400">Response SLA Deadline</label>
-                        <p className={`font-medium ${
-                          incidentsAPI.isIncidentOverdue(incidentDetails) ? 'text-red-400' : 'text-white'
-                        }`}>
-                          {incidentsAPI.formatTimestamp(incidentDetails.response_sla_deadline)}
-                          {incidentsAPI.isIncidentOverdue(incidentDetails) && (
-                            <span className="ml-2 text-red-400">⚠️ Overdue</span>
-                          )}
-                        </p>
-                      </div>
-                    )}
-                    {incidentDetails.resolution_sla_deadline && (
-                      <div>
-                        <label className="text-sm text-gray-400">Resolution SLA Deadline</label>
-                        <p className={`font-medium ${
-                          incidentsAPI.isIncidentOverdue(incidentDetails) ? 'text-red-400' : 'text-white'
-                        }`}>
-                          {incidentsAPI.formatTimestamp(incidentDetails.resolution_sla_deadline)}
-                          {incidentsAPI.isIncidentOverdue(incidentDetails) && (
-                            <span className="ml-2 text-red-400">⚠️ Overdue</span>
-                          )}
-                        </p>
-                      </div>
-                    )}
+                    <div>
+                      <label className="text-sm text-gray-400">Resolution SLA Deadline</label>
+                      <p className={`text-white ${
+                        incidentsAPI.isIncidentOverdue(incidentDetails) ? 'text-red-400' : 'text-white'
+                      }`}>
+                        {incidentsAPI.formatTimestamp(incidentDetails.resolution_sla_deadline)}
+                        {incidentsAPI.isIncidentOverdue(incidentDetails) && (
+                          <span className="ml-2 text-red-400">⚠️ Overdue</span>
+                        )}
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -180,7 +184,10 @@ const IncidentDetailsModal = ({ incident, isOpen, onClose }) => {
                             <span className="text-white font-medium">Alert #{alertId}</span>
                             <span className="text-gray-400 ml-2">(ID: {alertId})</span>
                           </div>
-                          <button className="text-cerberus-red hover:text-red-400 text-sm transition-colors">
+                          <button 
+                            onClick={() => onViewAlert && onViewAlert(alertId)}
+                            className="text-cerberus-red hover:text-red-400 text-sm transition-colors"
+                          >
                             View Alert
                           </button>
                         </div>
@@ -199,7 +206,7 @@ const IncidentDetailsModal = ({ incident, isOpen, onClose }) => {
                       <div key={index} className="bg-gray-750 rounded-lg p-4 border border-gray-700">
                         <div className="flex justify-between items-start mb-2">
                           <span className="text-sm text-gray-400">
-                            {note.author || 'Unknown'} • {incidentsAPI.formatTimestamp(note.created_at)}
+                            {note.created_by} • {incidentsAPI.formatTimestamp(note.created_at)}
                           </span>
                         </div>
                         <p className="text-white">{note.content}</p>
@@ -208,10 +215,22 @@ const IncidentDetailsModal = ({ incident, isOpen, onClose }) => {
                   </div>
                 </div>
               )}
+
+              {/* Raw Data */}
+              {incidentDetails.raw_data && Object.keys(incidentDetails.raw_data).length > 0 && (
+                <div>
+                  <h3 className="text-lg font-medium text-white mb-4">Additional Data</h3>
+                  <div className="bg-gray-750 rounded-lg p-4">
+                    <pre className="text-white text-sm whitespace-pre-wrap">
+                      {JSON.stringify(incidentDetails.raw_data, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-8">
-              <p className="text-gray-400">No incident details available</p>
+              <div className="text-gray-400">No incident details available.</div>
             </div>
           )}
         </div>
