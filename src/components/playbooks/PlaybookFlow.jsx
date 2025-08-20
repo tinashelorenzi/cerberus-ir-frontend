@@ -301,28 +301,33 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
 
   const handleCompleteFlowWithStatus = async () => {
     try {
+      // Validate flow is complete before attempting
+      if (!playbookFlowService.isFlowComplete(steps)) {
+        setError('All required steps must be completed before closing the flow');
+        return;
+      }
+  
       setCommitting(true);
       
       await playbookFlowService.completeFlow(
         flowData.flow_id, 
-        completionData.finalReport, 
-        completionData.incidentStatus === 'closed',
-        completionData.alertDisposition === 'closed'
+        completionData.finalReport,
+        completionData.alertDisposition,
+        completionData.incidentStatus
       );
       
       // Refresh to show completed status
       await refreshSteps();
       
       setShowCompletionModal(false);
-      setCompletionData({
-        finalReport: '',
-        alertDisposition: 'resolved',
-        incidentStatus: 'resolved'
-      });
       
     } catch (err) {
       console.error('Failed to complete flow:', err);
-      setError(`Failed to complete flow: ${err.message}`);
+      if (err.message.includes('100% complete')) {
+        setError('All required steps must be completed before the flow can be closed');
+      } else {
+        setError(`Failed to complete flow: ${err.message}`);
+      }
     } finally {
       setCommitting(false);
     }

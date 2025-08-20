@@ -293,33 +293,21 @@ class PlaybookFlowService {
   /**
    * Complete and commit the entire flow, updating alert and incident
    */
-  async completeFlow(flowId, finalReport = '', closeIncident = false, closeAlert = false) {
-    try {
-      const response = await fetch(
-        `${this.baseURL}/api/v1/incident-flows/${flowId}/complete`,
-        {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify({ 
-            final_report: finalReport,
-            close_incident: closeIncident,
-            close_alert: closeAlert,
-            update_entities: true // Flag to update related entities
-          })
-        }
-      );
-
-      return this.handleResponse(response);
-    } catch (error) {
-      // If the endpoint doesn't exist (404), try alternative approach
-      if (error.message.includes('404')) {
-        console.warn('Complete flow endpoint not found, using alternative approach');
-        
-        // Alternative: Update flow, incident, and alert separately
-        return await this.completeFlowManually(flowId, finalReport, closeIncident, closeAlert);
+  async completeFlow(flowId, finalReport = '', alertDisposition = 'resolved', incidentStatus = 'resolved') {
+    const response = await fetch(
+      `${this.baseURL}/api/v1/incident-flows/${flowId}/complete`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({ 
+          final_report: finalReport,
+          alert_disposition: alertDisposition,  // 'false_positive', 'resolved', 'closed'
+          incident_status: incidentStatus       // 'resolved', 'closed'
+        })
       }
-      throw error;
-    }
+    );
+  
+    return this.handleResponse(response);
   }
 
   /**
