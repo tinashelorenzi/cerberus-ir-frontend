@@ -1,163 +1,751 @@
-import React, { useState } from 'react';
+// src/components/playbooks/PlaybookFlow.jsx
+
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import playbookFlowService from '../../services/playbookFlow';
 
 const PlaybookFlow = ({ playbook, incident, onClose }) => {
-  const [currentPhase, setCurrentPhase] = useState(0);
-  const [completedSteps, setCompletedSteps] = useState(new Set());
-  const [currentStep, setCurrentStep] = useState(0);
+  const { user } = useAuth();
+  
+  // State management
+  const [flowData, setFlowData] = useState(null);
+  const [steps, setSteps] = useState([]);
+  const [phaseSteps, setPhaseSteps] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedStep, setSelectedStep] = useState(null);
+  const [showUserInputModal, setShowUserInputModal] = useState(false);
+  const [userInputData, setUserInputData] = useState({});
+  const [submittingInput, setSubmittingInput] = useState(false);
+  const [executingStep, setExecutingStep] = useState(new Set());
+  const [showCommitModal, setShowCommitModal] = useState(false);
+  const [finalReport, setFinalReport] = useState('');
+  const [closeIncident, setCloseIncident] = useState(true);
+  const [closeAlert, setCloseAlert] = useState(true);
+  const [committing, setCommitting] = useState(false);
 
-  // Dummy data for demonstration
-  const phases = playbook?.playbook_definition?.phases || [
-    {
-      title: 'Initial Assessment',
-      description: 'Gather initial information about the incident',
-      steps: [
-        { title: 'Review Alert Details', type: 'manual_action', description: 'Examine the alert information and context', estimated_minutes: 5, required: true },
-        { title: 'Identify Affected Systems', type: 'manual_action', description: 'Determine which systems are impacted', estimated_minutes: 10, required: true },
-        { title: 'Assess Severity Level', type: 'decision_point', description: 'Evaluate the severity and priority of the incident', estimated_minutes: 5, required: true }
-      ]
-    },
-    {
-      title: 'Containment',
-      description: 'Isolate and contain the threat',
-      steps: [
-        { title: 'Block Suspicious IPs', type: 'automated_action', description: 'Automatically block identified malicious IP addresses', estimated_minutes: 2, required: true },
-        { title: 'Disable Compromised Accounts', type: 'manual_action', description: 'Disable any compromised user accounts', estimated_minutes: 15, required: true },
-        { title: 'Isolate Affected Systems', type: 'manual_action', description: 'Disconnect affected systems from the network', estimated_minutes: 20, required: true }
-      ]
-    },
-    {
-      title: 'Investigation',
-      description: 'Deep dive analysis of the incident',
-      steps: [
-        { title: 'Collect System Logs', type: 'artifact_collection', description: 'Gather relevant system and security logs', estimated_minutes: 30, required: true },
-        { title: 'Analyze Network Traffic', type: 'analysis', description: 'Review network traffic patterns for anomalies', estimated_minutes: 45, required: true },
-        { title: 'Review Access Logs', type: 'analysis', description: 'Examine user access and authentication logs', estimated_minutes: 30, required: true }
-      ]
-    },
-    {
-      title: 'Remediation',
-      description: 'Fix and restore affected systems',
-      steps: [
-        { title: 'Remove Malware', type: 'automated_action', description: 'Run automated malware removal tools', estimated_minutes: 60, required: true },
-        { title: 'Patch Vulnerabilities', type: 'manual_action', description: 'Apply security patches to affected systems', estimated_minutes: 120, required: true },
-        { title: 'Restore from Backup', type: 'manual_action', description: 'Restore clean system state from backup', estimated_minutes: 180, required: false }
-      ]
-    },
-    {
-      title: 'Recovery',
-      description: 'Return systems to normal operation',
-      steps: [
-        { title: 'Verify System Integrity', type: 'manual_action', description: 'Confirm systems are clean and secure', estimated_minutes: 30, required: true },
-        { title: 'Re-enable Services', type: 'manual_action', description: 'Gradually restore affected services', estimated_minutes: 45, required: true },
-        { title: 'Monitor for Recurrence', type: 'notification', description: 'Set up monitoring for similar threats', estimated_minutes: 15, required: true }
-      ]
+  // Initialize flow on component mount
+  useEffect(() => {
+    initializeFlow();
+  }, [playbook, incident]);
+
+  const initializeFlow = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      let flow = null;
+      
+      try {
+        // Try to create a new flow
+        const flowData = {
+          incident_id: incident.incident_id,
+          playbook_id: playbook.id,
+          alert_id: incident.alert_id || null,
+          assigned_analyst_id: user.id
+        };
+
+        flow = await playbookFlowService.createIncidentFlow(flowData);
+        
+      } catch (createError) {
+        // Check if it's a 409 conflict (flow already exists)
+        if (createError.message.includes('already exists') || createError.message.includes('409')) {
+          try {
+            // Try to get the existing flow
+            console.log('Flow already exists, attempting to fetch existing flow...');
+            flow = await playbookFlowService.getFlowByIncidentId(incident.incident_id);
+            
+            if (!flow) {
+              throw new Error('Could not retrieve existing flow for this incident');
+            }
+          } catch (fetchError) {
+            console.error('Failed to fetch existing flow:', fetchError);
+            setError('Incident flow already exists but could not be retrieved. Please refresh the page or contact support.');
+            return;
+          }
+        } else {
+          throw createError;
+        }
+      }
+
+      if (!flow) {
+        throw new Error('Failed to create or retrieve incident flow');
+      }
+
+      setFlowData(flow);
+
+      // Get flow steps
+      const stepsData = await playbookFlowService.getFlowSteps(flow.flow_id);
+      setSteps(stepsData);
+
+      // Group steps by phase
+      const groupedSteps = playbookFlowService.groupStepsByPhase(stepsData);
+      setPhaseSteps(groupedSteps);
+
+    } catch (err) {
+      console.error('Failed to initialize flow:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  const handleStepComplete = (phaseIndex, stepIndex) => {
-    const stepKey = `${phaseIndex}-${stepIndex}`;
-    setCompletedSteps(prev => new Set([...prev, stepKey]));
+  const refreshSteps = async () => {
+    try {
+      const stepsData = await playbookFlowService.getFlowSteps(flowData.flow_id);
+      setSteps(stepsData);
+      
+      const groupedSteps = playbookFlowService.groupStepsByPhase(stepsData);
+      setPhaseSteps(groupedSteps);
+
+      // Also refresh flow data to get updated progress
+      const updatedFlow = await playbookFlowService.getIncidentFlow(flowData.flow_id);
+      setFlowData(updatedFlow);
+    } catch (err) {
+      console.error('Failed to refresh steps:', err);
+    }
+  };
+
+  // Step execution handlers
+  const handleStartStep = async (step) => {
+    try {
+      setExecutingStep(prev => new Set(prev).add(step.step_name));
+      
+      await playbookFlowService.startStep(flowData.flow_id, step.step_name);
+      await refreshSteps();
+      
+    } catch (err) {
+      console.error('Failed to start step:', err);
+      setError(`Failed to start step: ${err.message}`);
+    } finally {
+      setExecutingStep(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(step.step_name);
+        return newSet;
+      });
+    }
+  };
+
+  const handleCompleteStep = async (step, outputData = {}) => {
+    try {
+      setExecutingStep(prev => new Set(prev).add(step.step_name));
+      
+      await playbookFlowService.completeStep(flowData.flow_id, step.step_name, {
+        output_data: outputData,
+        success: true
+      });
+      
+      await refreshSteps();
+      
+    } catch (err) {
+      console.error('Failed to complete step:', err);
+      setError(`Failed to complete step: ${err.message}`);
+    } finally {
+      setExecutingStep(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(step.step_name);
+        return newSet;
+      });
+    }
+  };
+
+  const handleSkipStep = async (step, reason) => {
+    try {
+      setExecutingStep(prev => new Set(prev).add(step.step_name));
+      
+      await playbookFlowService.skipStep(flowData.flow_id, step.step_name, reason);
+      await refreshSteps();
+      
+    } catch (err) {
+      console.error('Failed to skip step:', err);
+      setError(`Failed to skip step: ${err.message}`);
+    } finally {
+      setExecutingStep(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(step.step_name);
+        return newSet;
+      });
+    }
+  };
+
+  // User input handlers
+  const handleShowUserInput = (step) => {
+    setSelectedStep(step);
     
-    // Auto-advance to next step
-    const currentPhaseSteps = phases[phaseIndex].steps;
-    if (stepIndex < currentPhaseSteps.length - 1) {
-      setCurrentStep(stepIndex + 1);
-    } else if (phaseIndex < phases.length - 1) {
-      // Move to next phase
-      setCurrentPhase(phaseIndex + 1);
-      setCurrentStep(0);
-    }
-  };
-
-  const handleStepSkip = (phaseIndex, stepIndex) => {
-    const stepKey = `${phaseIndex}-${stepIndex}`;
-    setCompletedSteps(prev => new Set([...prev, stepKey]));
+    // Get input schema from step definition - check multiple possible locations
+    const inputSchema = step.input_schema || step.inputs || {};
+    let fields = [];
     
-    // Auto-advance to next step
-    const currentPhaseSteps = phases[phaseIndex].steps;
-    if (stepIndex < currentPhaseSteps.length - 1) {
-      setCurrentStep(stepIndex + 1);
-    } else if (phaseIndex < phases.length - 1) {
-      setCurrentPhase(phaseIndex + 1);
-      setCurrentStep(0);
+    // Handle different input schema formats
+    if (inputSchema.fields && Array.isArray(inputSchema.fields)) {
+      fields = inputSchema.fields;
+    } else if (Array.isArray(inputSchema)) {
+      fields = inputSchema;
+    } else if (step.step_type === 'user_input') {
+      // Create a default input field if none specified
+      fields = [{
+        name: 'user_input',
+        type: 'textarea',
+        label: 'Input Required',
+        placeholder: 'Please provide the required information...',
+        required: true
+      }];
+    }
+    
+    // Initialize input data based on fields
+    const initialData = {};
+    fields.forEach(field => {
+      initialData[field.name] = field.type === 'checkbox' ? false : '';
+    });
+    
+    setUserInputData(initialData);
+    setShowUserInputModal(true);
+  };
+
+  const handleSubmitUserInput = async () => {
+    try {
+      setSubmittingInput(true);
+      
+      // Get input schema
+      const inputSchema = selectedStep.input_schema || selectedStep.inputs || {};
+      let fields = [];
+      
+      if (inputSchema.fields && Array.isArray(inputSchema.fields)) {
+        fields = inputSchema.fields;
+      } else if (Array.isArray(inputSchema)) {
+        fields = inputSchema;
+      } else {
+        fields = [{
+          name: 'user_input',
+          type: 'textarea',
+          label: 'Input Required'
+        }];
+      }
+      
+      // Prepare input submissions for each field
+      const inputPromises = [];
+      
+      for (const field of fields) {
+        const value = userInputData[field.name];
+        
+        const inputData = {
+          field_name: field.name,
+          field_type: field.type || 'text',
+          label: field.label || field.name,
+          raw_value: typeof value === 'string' ? value : JSON.stringify(value),
+          parsed_value: typeof value === 'object' ? value : null,
+          is_required: field.required || false,
+          is_sensitive: field.sensitive || false,
+          validation_rules: field.validation || null
+        };
+        
+        inputPromises.push(
+          playbookFlowService.submitUserInput(flowData.flow_id, inputData)
+        );
+      }
+      
+      // Submit all inputs
+      await Promise.all(inputPromises);
+      
+      // Complete the step with the collected input data
+      await handleCompleteStep(selectedStep, userInputData);
+      
+      // Close modal
+      setShowUserInputModal(false);
+      setSelectedStep(null);
+      setUserInputData({});
+      
+    } catch (err) {
+      console.error('Failed to submit user input:', err);
+      setError(`Failed to submit input: ${err.message}`);
+    } finally {
+      setSubmittingInput(false);
     }
   };
 
-  const getStepStatus = (phaseIndex, stepIndex) => {
-    const stepKey = `${phaseIndex}-${stepIndex}`;
-    if (completedSteps.has(stepKey)) {
-      return 'completed';
-    } else if (phaseIndex === currentPhase && stepIndex === currentStep) {
-      return 'current';
-    } else if (phaseIndex < currentPhase || (phaseIndex === currentPhase && stepIndex < currentStep)) {
-      return 'pending';
-    } else {
-      return 'upcoming';
+  // Flow completion handlers
+  const handleCompleteFlow = async () => {
+    try {
+      setCommitting(true);
+      
+      await playbookFlowService.completeFlow(
+        flowData.flow_id, 
+        finalReport, 
+        closeIncident,
+        closeAlert
+      );
+      
+      // Refresh to show completed status
+      await refreshSteps();
+      
+      setShowCommitModal(false);
+      setFinalReport('');
+      setCloseIncident(true);
+      setCloseAlert(true);
+      
+    } catch (err) {
+      console.error('Failed to complete flow:', err);
+      setError(`Failed to complete flow: ${err.message}`);
+    } finally {
+      setCommitting(false);
     }
   };
 
-  const getStepIcon = (step) => {
-    switch (step.type) {
-      case 'manual_action':
-        return (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
+  // Check if flow is ready to commit
+  const isFlowComplete = playbookFlowService.isFlowComplete(steps);
+  const hasFailedSteps = playbookFlowService.hasFailedRequiredSteps(steps);
+
+  // Debug logging for flow completion
+  console.log('Flow completion check:', {
+    stepsCount: steps.length,
+    isFlowComplete,
+    hasFailedSteps,
+    flowStatus: flowData?.status,
+    stepStatuses: steps.map(s => ({ name: s.step_name, status: s.status }))
+  });
+
+  const getStepActions = (step) => {
+    const canExecute = playbookFlowService.canExecuteStep(step, steps);
+    const isExecuting = executingStep.has(step.step_name);
+    
+    switch (step.status) {
+      case 'pending':
+        return canExecute ? (
+          <button
+            onClick={() => handleStartStep(step)}
+            disabled={isExecuting}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm disabled:opacity-50"
+          >
+            {isExecuting ? 'Starting...' : 'Start'}
+          </button>
+        ) : (
+          <span className="text-gray-400 text-sm">Waiting for dependencies</span>
         );
-      case 'automated_action':
-        return (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-        );
-      case 'decision_point':
-        return (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        );
-      case 'artifact_collection':
-        return (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        );
-      case 'analysis':
-        return (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-          </svg>
-        );
-      case 'notification':
-        return (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5zM4.19 4.19A2 2 0 004 6v10a2 2 0 002 2h10a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-1.81 1.19z" />
-          </svg>
-        );
+        
+      case 'in_progress':
+        if (step.step_type === 'user_input') {
+          return (
+            <button
+              onClick={() => handleShowUserInput(step)}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm"
+            >
+              Provide Input
+            </button>
+          );
+        } else if (step.step_type === 'manual_action') {
+          return (
+            <div className="flex space-x-2">
+              <button
+                onClick={() => handleCompleteStep(step)}
+                disabled={isExecuting}
+                className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm disabled:opacity-50"
+              >
+                {isExecuting ? 'Completing...' : 'Complete'}
+              </button>
+              <button
+                onClick={() => handleSkipStep(step, 'Manual skip')}
+                disabled={isExecuting}
+                className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-sm disabled:opacity-50"
+              >
+                Skip
+              </button>
+            </div>
+          );
+        }
+        return <span className="text-blue-400 text-sm">In Progress...</span>;
+        
+      case 'completed':
+        return <span className="text-green-400 text-sm">✅ Completed</span>;
+        
+      case 'failed':
+        return <span className="text-red-400 text-sm">❌ Failed</span>;
+        
+      case 'skipped':
+        return <span className="text-yellow-400 text-sm">⏭️ Skipped</span>;
+        
       default:
-        return (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        );
+        return <span className="text-gray-400 text-sm">{step.status}</span>;
     }
   };
+
+  const renderUserInputModal = () => {
+    if (!showUserInputModal || !selectedStep) return null;
+    
+    // Get input schema from step definition
+    const inputSchema = selectedStep.input_schema || selectedStep.inputs || {};
+    let fields = [];
+    
+    // Handle different input schema formats
+    if (inputSchema.fields && Array.isArray(inputSchema.fields)) {
+      fields = inputSchema.fields;
+    } else if (Array.isArray(inputSchema)) {
+      fields = inputSchema;
+    } else if (selectedStep.step_type === 'user_input') {
+      fields = [{
+        name: 'user_input',
+        type: 'textarea',
+        label: 'Input Required',
+        placeholder: 'Please provide the required information...',
+        required: true
+      }];
+    }
+    
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-white">{selectedStep.title}</h2>
+                <p className="text-gray-400 text-sm mt-1">{selectedStep.description}</p>
+              </div>
+              <button
+                onClick={() => setShowUserInputModal(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Instructions */}
+            {selectedStep.instructions && (
+              <div className="mb-6 p-4 bg-gray-700 rounded-lg">
+                <h3 className="font-medium text-white mb-2">Instructions</h3>
+                <p className="text-gray-300 text-sm whitespace-pre-wrap">{selectedStep.instructions}</p>
+              </div>
+            )}
+            
+            {/* Input Fields */}
+            {fields.length > 0 ? (
+              <div className="space-y-4 mb-6">
+                {fields.map((field, index) => (
+                  <div key={index}>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      {field.label || field.name}
+                      {field.required && <span className="text-red-400 ml-1">*</span>}
+                    </label>
+                    
+                    {field.type === 'textarea' ? (
+                      <textarea
+                        value={userInputData[field.name] || ''}
+                        onChange={(e) => setUserInputData(prev => ({
+                          ...prev,
+                          [field.name]: e.target.value
+                        }))}
+                        placeholder={field.placeholder}
+                        className="w-full bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
+                        rows={4}
+                      />
+                    ) : field.type === 'select' ? (
+                      <select
+                        value={userInputData[field.name] || ''}
+                        onChange={(e) => setUserInputData(prev => ({
+                          ...prev,
+                          [field.name]: e.target.value
+                        }))}
+                        className="w-full bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
+                      >
+                        <option value="">Select an option</option>
+                        {(field.options || []).map((option, optIndex) => (
+                          <option key={optIndex} value={option.value || option}>
+                            {option.label || option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : field.type === 'checkbox' ? (
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={userInputData[field.name] || false}
+                          onChange={(e) => setUserInputData(prev => ({
+                            ...prev,
+                            [field.name]: e.target.checked
+                          }))}
+                          className="mr-2"
+                        />
+                        <span className="text-gray-300">{field.description || field.label}</span>
+                      </label>
+                    ) : (
+                      <input
+                        type={field.type || 'text'}
+                        value={userInputData[field.name] || ''}
+                        onChange={(e) => setUserInputData(prev => ({
+                          ...prev,
+                          [field.name]: e.target.value
+                        }))}
+                        placeholder={field.placeholder}
+                        className="w-full bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
+                      />
+                    )}
+                    
+                    {field.description && field.type !== 'checkbox' && (
+                      <p className="text-gray-400 text-xs mt-1">{field.description}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mb-6 p-4 bg-gray-700 rounded-lg">
+                <p className="text-gray-300 text-sm">No specific input fields defined for this step. Please follow the instructions above and complete the step manually.</p>
+              </div>
+            )}
+            
+            {/* Actions */}
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowUserInputModal(false)}
+                className="px-4 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitUserInput}
+                disabled={submittingInput}
+                className="px-4 py-2 bg-cerberus-red hover:bg-red-700 text-white rounded-md text-sm transition-colors disabled:opacity-50"
+              >
+                {submittingInput ? 'Submitting...' : 'Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCommitModal = () => {
+    if (!showCommitModal) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-white">Complete Incident Flow</h2>
+                <p className="text-gray-400 text-sm mt-1">
+                  Finalize the incident response process and update the incident status
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCommitModal(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Flow Summary */}
+            <div className="mb-6 p-4 bg-gray-700 rounded-lg">
+              <h3 className="font-medium text-white mb-3">Flow Summary</h3>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-gray-400">Total Steps:</span>
+                  <span className="text-white ml-2">{steps.length}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Completed:</span>
+                  <span className="text-green-400 ml-2">
+                    {steps.filter(s => s.status === 'completed').length}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Skipped:</span>
+                  <span className="text-yellow-400 ml-2">
+                    {steps.filter(s => s.status === 'skipped').length}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Failed:</span>
+                  <span className="text-red-400 ml-2">
+                    {steps.filter(s => s.status === 'failed').length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Warning for failed steps */}
+            {hasFailedSteps && (
+              <div className="mb-6 p-4 bg-red-900 border border-red-600 rounded-lg">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h4 className="font-medium text-red-300">Warning: Failed Steps Detected</h4>
+                </div>
+                <p className="text-red-400 text-sm mt-1">
+                  Some required steps have failed. Please review before completing the flow.
+                </p>
+              </div>
+            )}
+
+            {/* Final Report */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Final Report / Summary
+              </label>
+              <textarea
+                value={finalReport}
+                onChange={(e) => setFinalReport(e.target.value)}
+                placeholder="Provide a summary of the incident response, key findings, and any recommendations..."
+                className="w-full bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
+                rows={6}
+              />
+              <p className="text-gray-400 text-xs mt-1">
+                This report will be attached to the incident record and can be used for post-incident review.
+              </p>
+            </div>
+
+            {/* Close Options */}
+            <div className="mb-6 space-y-4">
+              <h3 className="text-sm font-medium text-gray-300">Resolution Actions</h3>
+              
+              <div className="space-y-3">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={closeIncident}
+                    onChange={(e) => setCloseIncident(e.target.checked)}
+                    className="mr-3 w-4 h-4 text-cerberus-red bg-gray-700 border-gray-600 rounded focus:ring-cerberus-red focus:ring-2"
+                  />
+                  <div>
+                    <span className="text-gray-300 font-medium">Close Incident</span>
+                    <p className="text-gray-400 text-sm">
+                      Mark the incident as resolved and close it permanently.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={closeAlert}
+                    onChange={(e) => setCloseAlert(e.target.checked)}
+                    className="mr-3 w-4 h-4 text-cerberus-red bg-gray-700 border-gray-600 rounded focus:ring-cerberus-red focus:ring-2"
+                  />
+                  <div>
+                    <span className="text-gray-300 font-medium">Close Related Alert</span>
+                    <p className="text-gray-400 text-sm">
+                      Mark the originating alert as resolved and add resolution notes.
+                    </p>
+                  </div>
+                </label>
+              </div>
+
+              {(!closeIncident && !closeAlert) && (
+                <div className="p-3 bg-yellow-900 border border-yellow-600 rounded-lg">
+                  <div className="flex items-center">
+                    <svg className="w-4 h-4 text-yellow-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-yellow-300 text-sm">
+                      No entities will be closed. Only the playbook flow will be marked as completed.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowCommitModal(false)}
+                className="px-4 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCompleteFlow}
+                disabled={committing}
+                className="px-6 py-2 bg-cerberus-red hover:bg-red-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {committing ? 'Committing...' : 'Complete Flow'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="bg-gray-800 rounded-lg p-8 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cerberus-red mx-auto mb-4"></div>
+          <p className="text-white">Initializing playbook flow...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="bg-gray-800 rounded-lg p-8 text-center max-w-md">
+          <div className="text-red-400 mb-4">
+            <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h3 className="text-white font-medium mb-2">Error Loading Playbook</h3>
+          <p className="text-gray-400 mb-4">{error}</p>
+          <div className="flex space-x-3 justify-center">
+            <button
+              onClick={initializeFlow}
+              className="px-4 py-2 bg-cerberus-red hover:bg-red-700 text-white rounded-md text-sm transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-gray-800 rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden">
+      <div className="bg-gray-800 rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="bg-gray-900/50 border-b border-gray-700 p-6">
+        <div className="p-6 border-b border-gray-700">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-white">Playbook Execution</h2>
-              <p className="text-gray-400 mt-1">
-                {playbook?.name} - Incident {incident?.incident_id}
+              <h2 className="text-2xl font-bold text-white">{playbook.name}</h2>
+              <p className="text-gray-400 text-sm mt-1">
+                Incident: {incident.incident_id} | Flow: {flowData?.flow_id}
               </p>
+              {flowData && (
+                <div className="flex items-center space-x-4 mt-2">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-3 h-3 rounded-full ${
+                      flowData.status === 'completed' ? 'bg-green-500' :
+                      flowData.status === 'in_progress' ? 'bg-blue-500' :
+                      flowData.status === 'failed' ? 'bg-red-500' :
+                      'bg-gray-500'
+                    }`}></div>
+                    <span className="text-sm text-gray-300 capitalize">{flowData.status}</span>
+                  </div>
+                  <div className="text-sm text-gray-300">
+                    Progress: {Math.round(flowData.progress_percentage || 0)}%
+                  </div>
+                  <div className="text-sm text-gray-300">
+                    Steps: {flowData.completed_steps || 0}/{flowData.total_steps || 0}
+                  </div>
+                </div>
+              )}
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-white transition-colors"
+              className="text-gray-400 hover:text-white"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -166,137 +754,299 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
           </div>
         </div>
 
+        {/* Progress Bar */}
+        {flowData && (
+          <div className="px-6 py-3 bg-gray-700">
+            <div className="flex justify-between text-sm text-gray-300 mb-2">
+              <span>Overall Progress</span>
+              <span>{Math.round(flowData.progress_percentage || 0)}%</span>
+            </div>
+            <div className="w-full bg-gray-600 rounded-full h-2">
+              <div 
+                className="h-2 rounded-full transition-all duration-300"
+                style={{ 
+                  width: `${Math.max(0, Math.min(100, flowData.progress_percentage || 0))}%`,
+                  minWidth: flowData.progress_percentage > 0 ? '4px' : '0px',
+                  backgroundColor: '#dc2626' // Explicit red color as fallback
+                }}
+              ></div>
+            </div>
+            {/* Debug info - remove this later */}
+            <div className="text-xs text-gray-400 mt-1">
+              Debug: {flowData.completed_steps}/{flowData.total_steps} steps = {flowData.progress_percentage}%
+            </div>
+          </div>
+        )}
+
         {/* Kanban Board */}
-        <div className="flex-1 overflow-x-auto">
-          <div className="flex space-x-6 p-6 min-w-max">
-            {phases.map((phase, phaseIndex) => (
-              <div key={phaseIndex} className="flex-shrink-0 w-80">
-                <div className="bg-gray-700 rounded-lg p-4">
+        <div className="flex-1 overflow-auto p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 min-h-full">
+            {Object.entries(phaseSteps).map(([phaseName, phaseStepsArray]) => {
+              const phaseProgress = playbookFlowService.getPhaseProgress(phaseStepsArray);
+              const phaseStatusCounts = playbookFlowService.getStepStatusCounts(phaseStepsArray);
+              
+              return (
+                <div key={phaseName} className="bg-gray-700 rounded-lg flex flex-col">
                   {/* Phase Header */}
-                  <div className="mb-4">
+                  <div className="p-4 border-b border-gray-600">
                     <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold text-white">
-                        {phase.title}
-                      </h3>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        phaseIndex < currentPhase 
-                          ? 'bg-green-600 text-white' 
-                          : phaseIndex === currentPhase 
-                          ? 'bg-blue-600 text-white' 
-                          : 'bg-gray-600 text-gray-300'
-                      }`}>
-                        {phaseIndex < currentPhase ? 'Completed' : phaseIndex === currentPhase ? 'In Progress' : 'Pending'}
-                      </span>
+                      <h3 className="font-semibold text-white">{phaseName}</h3>
+                      <span className="text-sm text-gray-300">{phaseProgress}%</span>
                     </div>
-                    <p className="text-sm text-gray-400">{phase.description}</p>
+                    <div className="w-full bg-gray-600 rounded-full h-1.5 mb-3">
+                      <div 
+                        className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                        style={{ 
+                          width: `${Math.max(0, Math.min(100, phaseProgress))}%`,
+                          minWidth: phaseProgress > 0 ? '2px' : '0px'
+                        }}
+                      ></div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {phaseStatusCounts.completed > 0 && (
+                        <span className="bg-green-600 text-white px-2 py-1 rounded">
+                          ✓ {phaseStatusCounts.completed}
+                        </span>
+                      )}
+                      {phaseStatusCounts.in_progress > 0 && (
+                        <span className="bg-blue-600 text-white px-2 py-1 rounded">
+                          🔄 {phaseStatusCounts.in_progress}
+                        </span>
+                      )}
+                      {phaseStatusCounts.pending > 0 && (
+                        <span className="bg-gray-600 text-white px-2 py-1 rounded">
+                          ⏳ {phaseStatusCounts.pending}
+                        </span>
+                      )}
+                      {phaseStatusCounts.waiting_input > 0 && (
+                        <span className="bg-purple-600 text-white px-2 py-1 rounded">
+                          📝 {phaseStatusCounts.waiting_input}
+                        </span>
+                      )}
+                      {phaseStatusCounts.failed > 0 && (
+                        <span className="bg-red-600 text-white px-2 py-1 rounded">
+                          ❌ {phaseStatusCounts.failed}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Steps */}
-                  <div className="space-y-3">
-                    {phase.steps.map((step, stepIndex) => {
-                      const status = getStepStatus(phaseIndex, stepIndex);
+                  {/* Phase Steps */}
+                  <div className="flex-1 p-4 space-y-3">
+                    {phaseStepsArray.map((step) => {
+                      const canExecute = playbookFlowService.canExecuteStep(step, steps);
+                      const isExecuting = executingStep.has(step.step_name);
+                      const statusColor = playbookFlowService.getStatusColor(step.status);
+                      
                       return (
-                        <div
-                          key={stepIndex}
-                          className={`p-3 rounded-lg border transition-all ${
-                            status === 'completed'
-                              ? 'bg-green-900/30 border-green-600'
-                              : status === 'current'
-                              ? 'bg-blue-900/30 border-blue-600'
-                              : status === 'pending'
-                              ? 'bg-yellow-900/30 border-yellow-600'
-                              : 'bg-gray-600/30 border-gray-500'
-                          }`}
+                        <div 
+                          key={step.step_name} 
+                          className={`bg-gray-800 rounded-lg p-4 border-l-4 transition-all duration-200 ${
+                            step.status === 'completed' ? 'border-green-500' :
+                            step.status === 'in_progress' ? 'border-blue-500' :
+                            step.status === 'failed' ? 'border-red-500' :
+                            step.status === 'waiting_input' ? 'border-purple-500' :
+                            canExecute ? 'border-yellow-500' :
+                            'border-gray-600'
+                          } ${isExecuting ? 'opacity-75' : ''}`}
                         >
+                          {/* Step Header */}
                           <div className="flex items-start justify-between mb-2">
-                            <div className="flex items-center space-x-2">
-                              <div className={`p-1 rounded ${
-                                status === 'completed'
-                                  ? 'bg-green-600 text-white'
-                                  : status === 'current'
-                                  ? 'bg-blue-600 text-white'
-                                  : status === 'pending'
-                                  ? 'bg-yellow-600 text-white'
-                                  : 'bg-gray-600 text-gray-300'
-                              }`}>
-                                {getStepIcon(step)}
-                              </div>
-                              <h4 className="text-sm font-medium text-white">{step.title}</h4>
+                            <div className="flex-1">
+                              <h4 className="font-medium text-white text-sm">{step.title}</h4>
+                              <p className="text-gray-400 text-xs mt-1">{step.description}</p>
                             </div>
-                            <span className="text-xs text-gray-400">{step.estimated_minutes}m</span>
+                            <div className="flex items-center space-x-2 ml-3">
+                              <span className="text-lg">
+                                {playbookFlowService.getStatusIcon(step.status)}
+                              </span>
+                              <span className={`text-xs px-2 py-1 rounded-full text-white ${
+                                statusColor === 'green' ? 'bg-green-600' :
+                                statusColor === 'blue' ? 'bg-blue-600' :
+                                statusColor === 'red' ? 'bg-red-600' :
+                                statusColor === 'purple' ? 'bg-purple-600' :
+                                statusColor === 'yellow' ? 'bg-yellow-600' :
+                                statusColor === 'orange' ? 'bg-orange-600' :
+                                'bg-gray-600'
+                              }`}>
+                                {step.status.replace('_', ' ')}
+                              </span>
+                            </div>
                           </div>
-                          
-                          <p className="text-xs text-gray-400 mb-3">{step.description}</p>
-                          
-                          <div className="flex items-center justify-between">
-                            <span className={`text-xs px-2 py-1 rounded ${
-                              step.type === 'automated_action'
-                                ? 'bg-purple-600/20 text-purple-300'
-                                : step.type === 'manual_action'
-                                ? 'bg-blue-600/20 text-blue-300'
-                                : step.type === 'decision_point'
-                                ? 'bg-orange-600/20 text-orange-300'
-                                : 'bg-gray-600/20 text-gray-300'
-                            }`}>
-                              {step.type.replace('_', ' ')}
-                            </span>
-                            
-                            {status === 'current' && (
-                              <div className="flex space-x-2">
-                                <button
-                                  onClick={() => handleStepComplete(phaseIndex, stepIndex)}
-                                  className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors"
-                                >
-                                  Complete
-                                </button>
-                                {!step.required && (
-                                  <button
-                                    onClick={() => handleStepSkip(phaseIndex, stepIndex)}
-                                    className="px-3 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700 transition-colors"
-                                  >
-                                    Skip
-                                  </button>
-                                )}
-                              </div>
+
+                          {/* Step Metadata */}
+                          <div className="flex items-center space-x-4 text-xs text-gray-400 mb-3">
+                            <span>Type: {step.step_type?.replace('_', ' ')}</span>
+                            {step.expected_duration && (
+                              <span>Est: {playbookFlowService.formatDuration(step.expected_duration)}</span>
                             )}
-                            
-                            {status === 'completed' && (
-                              <div className="flex items-center text-green-400">
-                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                                <span className="text-xs">Done</span>
-                              </div>
+                            {step.actual_duration && (
+                              <span>Actual: {playbookFlowService.formatDuration(step.actual_duration)}</span>
                             )}
                           </div>
+
+                          {/* Step Dependencies */}
+                          {step.depends_on_steps && step.depends_on_steps.length > 0 && (
+                            <div className="mb-3">
+                              <p className="text-xs text-gray-400 mb-1">Depends on:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {step.depends_on_steps.map((depStep) => {
+                                  const depStepData = steps.find(s => s.step_name === depStep);
+                                  const isDepCompleted = depStepData?.status === 'completed';
+                                  
+                                  return (
+                                    <span 
+                                      key={depStep}
+                                      className={`text-xs px-2 py-1 rounded ${
+                                        isDepCompleted 
+                                          ? 'bg-green-600 text-white' 
+                                          : 'bg-gray-600 text-gray-300'
+                                      }`}
+                                    >
+                                      {depStep}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Step Instructions (if in progress) */}
+                          {step.status === 'in_progress' && step.instructions && (
+                            <div className="mb-3 p-3 bg-gray-700 rounded text-xs">
+                              <p className="text-gray-300 font-medium mb-1">Instructions:</p>
+                              <p className="text-gray-400 whitespace-pre-wrap">{step.instructions}</p>
+                            </div>
+                          )}
+
+                          {/* Step Actions */}
+                          <div className="flex justify-end">
+                            {getStepActions(step)}
+                          </div>
+
+                          {/* Step Notes (if completed/failed) */}
+                          {step.notes && (step.status === 'completed' || step.status === 'failed') && (
+                            <div className="mt-3 p-2 bg-gray-700 rounded text-xs">
+                              <p className="text-gray-400">{step.notes}</p>
+                            </div>
+                          )}
+
+                          {/* Error Message (if failed) */}
+                          {step.error_message && step.status === 'failed' && (
+                            <div className="mt-3 p-2 bg-red-900 rounded text-xs">
+                              <p className="text-red-300">{step.error_message}</p>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
-        {/* Progress Bar */}
-        <div className="bg-gray-900/50 border-t border-gray-700 p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">Overall Progress</span>
-            <span className="text-sm text-white">
-              {Math.round((completedSteps.size / phases.reduce((acc, phase) => acc + phase.steps.length, 0)) * 100)}%
-            </span>
-          </div>
-          <div className="w-full bg-gray-700 rounded-full h-2">
-            <div 
-              className="bg-cerberus-green h-2 rounded-full transition-all duration-300"
-              style={{ 
-                width: `${(completedSteps.size / phases.reduce((acc, phase) => acc + phase.steps.length, 0)) * 100}%` 
-              }}
-            ></div>
+        {/* Footer Actions */}
+        <div className="p-6 border-t border-gray-700">
+          <div className="flex justify-between items-center">
+            <div className="flex space-x-4">
+              {flowData?.status === 'in_progress' && (
+                <>
+                  <button
+                    onClick={() => playbookFlowService.pauseFlow(flowData.flow_id, 'Manual pause')}
+                    className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md text-sm transition-colors"
+                  >
+                    Pause Flow
+                  </button>
+                  <button
+                    onClick={() => playbookFlowService.cancelFlow(flowData.flow_id, 'Manual cancellation')}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm transition-colors"
+                  >
+                    Cancel Flow
+                  </button>
+                </>
+              )}
+              {flowData?.status === 'paused' && (
+                <button
+                  onClick={() => playbookFlowService.resumeFlow(flowData.flow_id)}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm transition-colors"
+                >
+                  Resume Flow
+                </button>
+              )}
+              
+              {/* Flow Status Messages */}
+              {flowData?.status === 'completed' && (
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-2 px-4 py-2 bg-green-900 border border-green-600 rounded-md">
+                    <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-green-300 text-sm font-medium">Flow Completed Successfully</span>
+                  </div>
+                  
+                  {/* Test button to reset flow - for development only */}
+                  <button
+                    onClick={async () => {
+                      try {
+                        await playbookFlowService.updateFlowStatus(flowData.flow_id, 'in_progress');
+                        await refreshSteps();
+                      } catch (err) {
+                        console.error('Failed to reset flow:', err);
+                      }
+                    }}
+                    className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded text-xs transition-colors"
+                  >
+                    🔄 Reset for Testing
+                  </button>
+                </div>
+              )}
+
+              {/* Commit Button - Show when flow is complete but not yet committed */}
+              {isFlowComplete && !['completed', 'cancelled'].includes(flowData?.status) && (
+                <button
+                  onClick={() => setShowCommitModal(true)}
+                  className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold rounded-lg shadow-lg transform hover:scale-105 transition-all duration-200"
+                >
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Commit & Close Flow
+                </button>
+              )}
+              
+              {/* Debug info for commit button - remove this later */}
+              <div className="text-xs text-gray-400 p-2 bg-gray-800 rounded">
+                <div>Debug: isComplete={isFlowComplete.toString()}, flowStatus={flowData?.status}, steps={steps.length}</div>
+                <div>Commit conditions: {isFlowComplete ? '✅' : '❌'} Complete, {flowData?.status} Status</div>
+                <div>Step statuses: {steps.map(s => `${s.step_name}:${s.status}`).join(', ')}</div>
+              </div>
+            </div>
+            
+            <div className="flex space-x-3">
+              <button
+                onClick={refreshSteps}
+                className="px-4 py-2 border border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 rounded-md text-sm transition-colors"
+              >
+                Refresh
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md text-sm transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* User Input Modal */}
+      {renderUserInputModal()}
+
+      {/* Commit Flow Modal */}
+      {renderCommitModal()}
     </div>
   );
 };
