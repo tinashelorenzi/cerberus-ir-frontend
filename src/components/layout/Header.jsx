@@ -53,7 +53,7 @@ const Header = () => {
   };
 
   const isInAdminSection = () => {
-    return ['/endpoint-tokens', '/playbooks'].includes(location.pathname);
+    return ['/endpoint-tokens', '/playbooks', '/report-templates'].includes(location.pathname);
   };
 
   // Close dropdowns when clicking outside
@@ -197,6 +197,19 @@ const Header = () => {
                       }`}
                     >
                       Playbooks Management
+                    </button>
+                  )}
+                  {user?.role === 'admin' && (
+                    <button
+                      onClick={() => {
+                        navigate('/report-templates');
+                        setIsAdminOpen(false);
+                      }}
+                      className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-700/50 transition-colors ${
+                        isActive('/report-templates') ? 'text-cerberus-green bg-gray-700/30' : 'text-gray-300'
+                      }`}
+                    >
+                      Report Templates
                     </button>
                   )}
                 </div>
