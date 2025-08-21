@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard'
 import PlaybookManagement from './components/playbooks/PlaybookManagement'
 import EndpointTokens from './components/EndpointTokens'
 import Incidents from './components/Incidents'
+import Reports from './components/Reports'
 import ReportTemplates from './components/reports/ReportTemplates'
 import './index.css'
 
@@ -20,6 +21,7 @@ function App() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/incidents" element={<Incidents />} />
+              <Route path="/reports" element={<Reports />} />
               <Route path="/playbooks" element={<PlaybookManagement />} />
               <Route path="/endpoint-tokens" element={<EndpointTokens />} />
               <Route path="/report-templates" element={<ReportTemplates />} />
