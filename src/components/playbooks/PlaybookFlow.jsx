@@ -44,35 +44,69 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
 
       let flow = null;
       
-      try {
-        // Try to create a new flow
-        const flowData = {
-          incident_id: incident.incident_id,
-          playbook_id: playbook.id,
-          alert_id: incident.alert_id || null,
-          assigned_analyst_id: user.id
-        };
-
-        flow = await playbookFlowService.createIncidentFlow(flowData);
+      // First, check if a flow already exists for this incident
+      const existingFlow = await playbookFlowService.getFlowByIncidentId(incident.incident_id);
+      
+      if (existingFlow) {
+        console.log('Found existing flow:', existingFlow.flow_id, 'with playbook:', existingFlow.playbook_id);
+        console.log('Selected playbook:', playbook.id);
         
-      } catch (createError) {
-        // Check if it's a 409 conflict (flow already exists)
-        if (createError.message.includes('already exists') || createError.message.includes('409')) {
-          try {
-            // Try to get the existing flow
-            console.log('Flow already exists, attempting to fetch existing flow...');
-            flow = await playbookFlowService.getFlowByIncidentId(incident.incident_id);
-            
-            if (!flow) {
-              throw new Error('Could not retrieve existing flow for this incident');
-            }
-          } catch (fetchError) {
-            console.error('Failed to fetch existing flow:', fetchError);
-            setError('Incident flow already exists but could not be retrieved. Please refresh the page or contact support.');
-            return;
-          }
+        // Check if it's the same playbook
+        if (existingFlow.playbook_id === playbook.id) {
+          console.log('Same playbook - using existing flow');
+          flow = existingFlow;
         } else {
-          throw createError;
+          // Different playbook - ask user what to do
+          const existingPlaybookName = existingFlow.playbook?.name || 'Unknown';
+          const shouldReplace = window.confirm(
+            `An incident response flow already exists for this incident using "${existingPlaybookName}".\n\n` +
+            `Would you like to replace it with "${playbook.name}"?\n\n` +
+            `• OK: Replace with new playbook\n` +
+            `• Cancel: Continue with existing flow`
+          );
+
+          if (shouldReplace) {
+            try {
+              console.log('User chose to replace - deleting existing flow');
+              await playbookFlowService.deleteIncidentFlow(existingFlow.flow_id);
+              
+              // Create new flow with selected playbook
+              const flowData = {
+                incident_id: incident.incident_id,
+                playbook_id: playbook.id,
+                alert_id: incident.alert_id || null,
+                assigned_analyst_id: user.id
+              };
+              
+              flow = await playbookFlowService.createIncidentFlow(flowData);
+              console.log('Created new flow:', flow.flow_id);
+            } catch (replaceError) {
+              console.error('Failed to replace flow:', replaceError);
+              setError(`Failed to replace existing flow: ${replaceError.message}`);
+              return;
+            }
+          } else {
+            console.log('User chose to keep existing flow');
+            flow = existingFlow;
+          }
+        }
+      } else {
+        // No existing flow - create new one
+        try {
+          console.log('No existing flow found - creating new one');
+          const flowData = {
+            incident_id: incident.incident_id,
+            playbook_id: playbook.id,
+            alert_id: incident.alert_id || null,
+            assigned_analyst_id: user.id
+          };
+
+          flow = await playbookFlowService.createIncidentFlow(flowData);
+          console.log('Created new flow:', flow.flow_id);
+        } catch (createError) {
+          console.error('Failed to create flow:', createError);
+          setError(`Failed to create incident flow: ${createError.message}`);
+          return;
         }
       }
 
@@ -82,13 +116,41 @@ const PlaybookFlow = ({ playbook, incident, onClose }) => {
 
       setFlowData(flow);
 
-      // Get flow steps
-      const stepsData = await playbookFlowService.getFlowSteps(flow.flow_id);
-      setSteps(stepsData);
+          // Get flow steps
+    console.log('Fetching steps for flow:', flow.flow_id);
+    const stepsData = await playbookFlowService.getFlowSteps(flow.flow_id);
+    console.log('Retrieved steps:', stepsData.length);
 
+    // If no steps exist, try to initialize them
+    if (stepsData.length === 0) {
+      console.log('No steps found - attempting to force initialize steps');
+      try {
+        const initResult = await playbookFlowService.forceInitializeSteps(flow.flow_id);
+        console.log('Force initialize result:', initResult.message);
+        
+        // Fetch steps again after initialization
+        const newStepsData = await playbookFlowService.getFlowSteps(flow.flow_id);
+        console.log('Steps after initialization:', newStepsData.length);
+        setSteps(newStepsData);
+        
+        // Group steps by phase
+        const groupedSteps = playbookFlowService.groupStepsByPhase(newStepsData);
+        console.log('Grouped steps by phase:', Object.keys(groupedSteps));
+        setPhaseSteps(groupedSteps);
+        
+      } catch (initError) {
+        console.error('Failed to initialize steps:', initError);
+        setError(`Failed to initialize workflow steps: ${initError.message}`);
+        return;
+      }
+    } else {
+      setSteps(stepsData);
+      
       // Group steps by phase
       const groupedSteps = playbookFlowService.groupStepsByPhase(stepsData);
+      console.log('Grouped steps by phase:', Object.keys(groupedSteps));
       setPhaseSteps(groupedSteps);
+    }
 
     } catch (err) {
       console.error('Failed to initialize flow:', err);

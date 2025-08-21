@@ -121,6 +121,36 @@ class PlaybookFlowService {
   }
 
   /**
+   * Force initialize steps for a flow that has no steps
+   */
+  async forceInitializeSteps(flowId) {
+    const response = await fetch(
+      `${this.baseURL}/api/v1/incident-flows/${flowId}/initialize-steps`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders()
+      }
+    );
+
+    return this.handleResponse(response);
+  }
+
+  /**
+   * Delete an incident flow
+   */
+  async deleteIncidentFlow(flowId) {
+    const response = await fetch(
+      `${this.baseURL}/api/v1/incident-flows/${flowId}`,
+      {
+        method: 'DELETE',
+        headers: this.getAuthHeaders()
+      }
+    );
+
+    return this.handleResponse(response);
+  }
+
+  /**
    * Get dashboard data for current user
    */
   async getFlowDashboard() {
