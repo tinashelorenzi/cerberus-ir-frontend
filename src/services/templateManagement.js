@@ -70,6 +70,7 @@ class ReportTemplateAPI {
     if (params.sort_by) searchParams.append('sort_by', params.sort_by);
     if (params.sort_order) searchParams.append('sort_order', params.sort_order);
 
+    console.log("Fetching templates from fastAPI backnd");
     const response = await fetch(
       `${this.baseURL}/api/v1/report-templates?${searchParams.toString()}`,
       {
