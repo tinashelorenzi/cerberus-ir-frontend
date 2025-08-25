@@ -6,41 +6,31 @@ import LoadingSpinner from '../common/LoadingSpinner';
 const ReportBuilder = ({ report, onSave, onCancel, onGenerate }) => {
   const { user } = useAuth();
   
-  // Report data and elements
+  // Report data and context
   const [reportData, setReportData] = useState(null);
-  const [elements, setElements] = useState([]);
+  const [template, setTemplate] = useState(null);
   const [buildingContext, setBuildingContext] = useState(null);
+  const [existingElements, setExistingElements] = useState([]);
+  
+  // Template analysis
+  const [detectedPlaceholders, setDetectedPlaceholders] = useState([]);
+  const [elementMappings, setElementMappings] = useState({});
   
   // UI State
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [generating, setGenerating] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
   const [error, setError] = useState(null);
-  const [activeSection, setActiveSection] = useState('executive_summary');
   
-  // Drag and Drop State
+  // Drag and Drop
   const [draggedItem, setDraggedItem] = useState(null);
-  const [dragOverSection, setDragOverSection] = useState(null);
-  const [dragOverPosition, setDragOverPosition] = useState(null);
   
-  // Editing State
-  const [editingElement, setEditingElement] = useState(null);
-  const [showElementModal, setShowElementModal] = useState(false);
-  const [newElementData, setNewElementData] = useState({
-    element_type: 'user_input',
-    display_name: '',
-    template_variable: '',
-    element_data: {}
-  });
-  
-  // Preview State
-  const [showPreview, setShowPreview] = useState(false);
-  const [previewContent, setPreviewContent] = useState('');
+  // Custom input modal
+  const [showCustomInputModal, setShowCustomInputModal] = useState(false);
+  const [selectedPlaceholder, setSelectedPlaceholder] = useState(null);
+  const [customInputValue, setCustomInputValue] = useState('');
 
-  // Refs for scroll and positioning
-  const sectionsRef = useRef({});
-  const dropZoneRef = useRef(null);
-
+  // Load data on component mount
   useEffect(() => {
     if (report) {
       loadReportData();
@@ -60,8 +50,27 @@ const ReportBuilder = ({ report, onSave, onCancel, onGenerate }) => {
       ]);
       
       setReportData(reportResponse);
-      setElements(elementsResponse);
+      setExistingElements(elementsResponse);
       setBuildingContext(contextResponse);
+      
+      // Set template from report
+      if (reportResponse.template) {
+        setTemplate(reportResponse.template);
+      }
+      
+      // Build existing mappings from elements
+      const mappings = {};
+      elementsResponse.forEach(element => {
+        if (element.template_variable) {
+          mappings[element.template_variable] = {
+            elementId: element.id,
+            recordType: element.element_type,
+            displayName: element.display_name,
+            value: element.element_data?.value || element.element_data?.content || element.element_data?.user_input || '[No Value]'
+          };
+        }
+      });
+      setElementMappings(mappings);
       
     } catch (err) {
       console.error('Failed to load report data:', err);
@@ -71,672 +80,771 @@ const ReportBuilder = ({ report, onSave, onCancel, onGenerate }) => {
     }
   };
 
-  const handleSave = async () => {
+  // Analyze template content for Jinja placeholders
+  useEffect(() => {
+    if (template?.content) {
+      analyzeTemplate(template.content);
+    }
+  }, [template, elementMappings]);
+
+  const analyzeTemplate = (content) => {
+    const jinjaRegex = /\{\{[\s]*([^}]+?)[\s]*\}\}/g;
+    const placeholders = [];
+    let match;
+
+    while ((match = jinjaRegex.exec(content)) !== null) {
+      const variable = match[1].trim().split('|')[0].trim(); // Remove filters
+      const startIndex = match.index;
+      const endIndex = match.index + match[0].length;
+      
+      if (!placeholders.some(p => p.variable === variable)) {
+        placeholders.push({
+          id: `placeholder_${placeholders.length}`,
+          variable,
+          fullMatch: match[0],
+          startIndex,
+          endIndex,
+          mapped: !!elementMappings[variable]
+        });
+      }
+    }
+    
+    setDetectedPlaceholders(placeholders);
+  };
+
+  // Fill remaining placeholders with N/A
+  const fillRemainingWithNA = async () => {
     try {
-      setSaving(true);
-      await onSave(reportData);
+      const unmappedPlaceholders = detectedPlaceholders.filter(
+        placeholder => !elementMappings[placeholder.variable]
+      );
+
+      if (unmappedPlaceholders.length === 0) {
+        return; // No unmapped placeholders
+      }
+
+      // Create elements for all unmapped placeholders
+      const elementPromises = unmappedPlaceholders.map(async (placeholder) => {
+        const elementData = {
+          element_type: 'user_input',
+          element_key: `na_${placeholder.variable}`,
+          display_name: `N/A: ${placeholder.variable}`,
+          template_variable: placeholder.variable,
+          element_data: { value: 'N/A' },
+          section_name: 'main',
+          position_order: 0
+        };
+
+        return await reportsAPI.addReportElement(report.id, elementData);
+      });
+
+      const newElements = await Promise.all(elementPromises);
+
+      // Update local state
+      const newMappings = { ...elementMappings };
+      unmappedPlaceholders.forEach((placeholder, index) => {
+        newMappings[placeholder.variable] = {
+          elementId: newElements[index].id,
+          recordType: 'user_input',
+          displayName: `N/A: ${placeholder.variable}`,
+          value: 'N/A'
+        };
+      });
+
+      setElementMappings(newMappings);
     } catch (err) {
+      console.error('Failed to fill placeholders with N/A:', err);
       setError(err.message);
-    } finally {
-      setSaving(false);
     }
   };
 
-  const handleGenerate = async () => {
-    try {
-      setGenerating(true);
-      await onGenerate(report.id);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  // ============================================================================
-  // DRAG AND DROP HANDLERS
-  // ============================================================================
-
+  // Drag handlers
   const handleDragStart = (e, item, sourceType) => {
     setDraggedItem({
       ...item,
-      sourceType // 'data_source' or 'existing_element'
+      sourceType // 'data_source', 'user_input', 'analytics'
     });
-    
     e.dataTransfer.effectAllowed = 'copy';
-    e.dataTransfer.setData('text/plain', ''); // Required for some browsers
   };
 
-  const handleDragOver = (e, sectionName, position = null) => {
+  const handleDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    
-    setDragOverSection(sectionName);
-    setDragOverPosition(position);
   };
 
-  const handleDragLeave = (e) => {
-    // Only clear if we're leaving the entire drop zone
-    if (!dropZoneRef.current?.contains(e.relatedTarget)) {
-      setDragOverSection(null);
-      setDragOverPosition(null);
-    }
-  };
-
-  const handleDrop = async (e, sectionName, position = null) => {
+  const handleDrop = async (e, placeholder) => {
     e.preventDefault();
     
-    if (!draggedItem) return;
+    if (!draggedItem || !placeholder) return;
     
     try {
       let elementData;
       
+      // Prepare element data based on source type
       if (draggedItem.sourceType === 'data_source') {
-        // Create new element from data source
         elementData = {
           element_type: draggedItem.source_type,
           element_key: draggedItem.source_id,
           display_name: draggedItem.display_name,
-          section_name: sectionName,
-          position_order: position !== null ? position : getNextPositionInSection(sectionName),
+          template_variable: placeholder.variable,
           element_data: draggedItem.sample_value ? { value: draggedItem.sample_value } : {},
-          template_variable: draggedItem.display_name.toLowerCase().replace(/\s+/g, '_')
+          section_name: 'main', // Default section
+          position_order: 0
         };
-        
-        const newElement = await reportsAPI.addReportElement(report.id, elementData);
-        setElements(prev => [...prev, newElement]);
-        
-      } else if (draggedItem.sourceType === 'existing_element') {
-        // Move existing element to new position
-        const updatedElement = await reportsAPI.updateReportElement(
-          report.id,
-          draggedItem.id,
-          {
-            section_name: sectionName,
-            position_order: position !== null ? position : getNextPositionInSection(sectionName)
-          }
-        );
-        
-        setElements(prev => prev.map(el => 
-          el.id === draggedItem.id ? updatedElement : el
-        ));
+      } else if (draggedItem.sourceType === 'user_input') {
+        elementData = {
+          element_type: 'user_input',
+          element_key: `input_${draggedItem.id}`,
+          display_name: draggedItem.input_label || draggedItem.field_name,
+          template_variable: placeholder.variable,
+          element_data: { 
+            execution_id: draggedItem.execution_id,
+            field_name: draggedItem.field_name,
+            value: draggedItem.user_input 
+          },
+          section_name: 'main',
+          position_order: 0
+        };
+      } else if (draggedItem.sourceType === 'analytics') {
+        elementData = {
+          element_type: 'analytics',
+          element_key: draggedItem.metric,
+          display_name: draggedItem.display_name,
+          template_variable: placeholder.variable,
+          element_data: { 
+            metric_type: draggedItem.metric,
+            value: draggedItem.value 
+          },
+          section_name: 'main',
+          position_order: 0
+        };
       }
       
-      // Reorder elements in the target section
-      await reorderSectionElements(sectionName);
+      // Check if placeholder is already mapped
+      if (elementMappings[placeholder.variable]) {
+        // Update existing element
+        const existingMapping = elementMappings[placeholder.variable];
+        await reportsAPI.updateReportElement(
+          report.id,
+          existingMapping.elementId,
+          elementData
+        );
+      } else {
+        // Create new element
+        const newElement = await reportsAPI.addReportElement(report.id, elementData);
+        elementData.id = newElement.id;
+      }
+      
+      // Update local state
+      setElementMappings(prev => ({
+        ...prev,
+        [placeholder.variable]: {
+          elementId: elementData.id,
+          recordType: elementData.element_type,
+          displayName: elementData.display_name,
+          value: elementData.element_data?.value || elementData.element_data?.user_input || '[No Value]'
+        }
+      }));
       
     } catch (err) {
       console.error('Drop failed:', err);
       setError(err.message);
-    } finally {
-      setDraggedItem(null);
-      setDragOverSection(null);
-      setDragOverPosition(null);
     }
-  };
-
-  const getNextPositionInSection = (sectionName) => {
-    const sectionElements = elements.filter(el => el.section_name === sectionName);
-    return sectionElements.length > 0 ? Math.max(...sectionElements.map(el => el.position_order)) + 1 : 0;
-  };
-
-  const reorderSectionElements = async (sectionName) => {
-    const sectionElements = elements
-      .filter(el => el.section_name === sectionName)
-      .sort((a, b) => a.position_order - b.position_order);
     
-    const reorderPromises = sectionElements.map((element, index) => 
-      reportsAPI.updateReportElement(report.id, element.id, { position_order: index })
-    );
-    
-    await Promise.all(reorderPromises);
-    await loadReportData(); // Refresh to get updated order
+    setDraggedItem(null);
   };
 
-  // ============================================================================
-  // ELEMENT MANAGEMENT
-  // ============================================================================
-
-  const handleEditElement = (element) => {
-    setEditingElement(element);
-    setNewElementData({
-      element_type: element.element_type,
-      display_name: element.display_name,
-      template_variable: element.template_variable || '',
-      element_data: element.element_data || {}
-    });
-    setShowElementModal(true);
+  // Handle custom input
+  const handleCustomInput = (placeholder) => {
+    setSelectedPlaceholder(placeholder);
+    setCustomInputValue(elementMappings[placeholder.variable]?.value || '');
+    setShowCustomInputModal(true);
   };
 
-  const handleDeleteElement = async (elementId) => {
-    if (!confirm('Are you sure you want to delete this element?')) return;
+  const saveCustomInput = async () => {
+    if (!selectedPlaceholder || !customInputValue.trim()) return;
     
     try {
-      await reportsAPI.deleteReportElement(report.id, elementId);
-      setElements(prev => prev.filter(el => el.id !== elementId));
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const handleSaveElement = async () => {
-    try {
-      if (editingElement) {
-        // Update existing element
-        const updatedElement = await reportsAPI.updateReportElement(
+      const elementData = {
+        element_type: 'user_input',
+        element_key: `custom_${selectedPlaceholder.variable}`,
+        display_name: `Custom: ${selectedPlaceholder.variable}`,
+        template_variable: selectedPlaceholder.variable,
+        element_data: { value: customInputValue.trim() },
+        section_name: 'main',
+        position_order: 0
+      };
+      
+      if (elementMappings[selectedPlaceholder.variable]) {
+        // Update existing
+        const existingMapping = elementMappings[selectedPlaceholder.variable];
+        await reportsAPI.updateReportElement(
           report.id,
-          editingElement.id,
-          newElementData
+          existingMapping.elementId,
+          elementData
         );
-        setElements(prev => prev.map(el => 
-          el.id === editingElement.id ? updatedElement : el
-        ));
+      } else {
+        // Create new
+        const newElement = await reportsAPI.addReportElement(report.id, elementData);
+        elementData.id = newElement.id;
       }
       
-      setShowElementModal(false);
-      setEditingElement(null);
-      resetElementModal();
+      // Update local state
+      setElementMappings(prev => ({
+        ...prev,
+        [selectedPlaceholder.variable]: {
+          elementId: elementData.id,
+          recordType: 'user_input',
+          displayName: elementData.display_name,
+          value: customInputValue.trim()
+        }
+      }));
+      
+      setShowCustomInputModal(false);
+      setSelectedPlaceholder(null);
+      setCustomInputValue('');
       
     } catch (err) {
+      console.error('Failed to save custom input:', err);
       setError(err.message);
     }
   };
 
-  const resetElementModal = () => {
-    setNewElementData({
-      element_type: 'user_input',
-      display_name: '',
-      template_variable: '',
-      element_data: {}
+  // Remove mapping
+  const removeMapping = async (variable) => {
+    try {
+      const mapping = elementMappings[variable];
+      if (mapping?.elementId) {
+        await reportsAPI.deleteReportElement(report.id, mapping.elementId);
+      }
+      
+      setElementMappings(prev => {
+        const newMappings = { ...prev };
+        delete newMappings[variable];
+        return newMappings;
+      });
+    } catch (err) {
+      console.error('Failed to remove mapping:', err);
+      setError(err.message);
+    }
+  };
+
+  // Generate preview content
+  const generatePreview = () => {
+    if (!template?.content) return 'No template content available';
+    
+    let preview = template.content;
+    
+    // Replace mapped placeholders
+    Object.entries(elementMappings).forEach(([variable, mapping]) => {
+      const placeholder = `{{ ${variable} }}`;
+      preview = preview.replaceAll(placeholder, mapping.value || `[${mapping.displayName}]`);
     });
+    
+    // Replace unmapped placeholders with [UNMAPPED] indicator
+    detectedPlaceholders.forEach(placeholder => {
+      if (!elementMappings[placeholder.variable]) {
+        preview = preview.replaceAll(placeholder.fullMatch, `[UNMAPPED: ${placeholder.variable}]`);
+      }
+    });
+    
+    return preview;
   };
 
-  // ============================================================================
-  // HELPER FUNCTIONS
-  // ============================================================================
+  // Convert markdown/plain text to HTML for rendering
+  const renderPreviewContent = (content) => {
+    // Simple markdown to HTML conversion
+    let html = content
+      // Headers
+      .replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mb-2">$1</h3>')
+      .replace(/^## (.*$)/gim, '<h2 class="text-xl font-semibold mb-3">$1</h2>')
+      .replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mb-4">$1</h1>')
+      // Bold
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      // Italic
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      // Code blocks
+      .replace(/```([\s\S]*?)```/g, '<pre class="bg-gray-100 p-3 rounded mb-3 overflow-x-auto"><code>$1</code></pre>')
+      // Inline code
+      .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 rounded text-sm">$1</code>')
+      // Lists
+      .replace(/^\* (.*$)/gim, '<li class="mb-1">$1</li>')
+      .replace(/^- (.*$)/gim, '<li class="mb-1">$1</li>')
+      // Paragraphs
+      .replace(/\n\n/g, '</p><p class="mb-3">')
+      // Line breaks
+      .replace(/\n/g, '<br>');
 
-  const getSectionElements = (sectionName) => {
-    return elements
-      .filter(el => el.section_name === sectionName)
-      .sort((a, b) => a.position_order - b.position_order);
+    // Wrap in paragraph tags if not already wrapped
+    if (!html.startsWith('<')) {
+      html = `<p class="mb-3">${html}</p>`;
+    }
+
+    return html;
   };
 
-  const getElementIcon = (elementType) => {
-    const icons = {
-      user_input: '📝',
-      analytics: '📊',
-      static_text: '📄',
-      incident_data: '🔍'
-    };
-    return icons[elementType] || '📋';
+  const getTypeIcon = (type) => {
+    switch (type) {
+      case 'incident_data': return '🔍';
+      case 'user_input': return '✏️';
+      case 'analytics': return '📊';
+      case 'playbook_data': return '📋';
+      default: return '📄';
+    }
   };
 
-  const getElementTypeDisplay = (elementType) => {
-    const displays = {
-      user_input: 'User Input',
-      analytics: 'Analytics',
-      static_text: 'Static Text',
-      incident_data: 'Incident Data'
-    };
-    return displays[elementType] || elementType;
+  const getTypeColor = (type) => {
+    switch (type) {
+      case 'incident_data': return 'bg-blue-500';
+      case 'user_input': return 'bg-green-500';
+      case 'analytics': return 'bg-purple-500';
+      case 'playbook_data': return 'bg-orange-500';
+      default: return 'bg-gray-500';
+    }
   };
-
-  const reportSections = [
-    { id: 'executive_summary', name: 'Executive Summary', description: 'High-level overview' },
-    { id: 'incident_details', name: 'Incident Details', description: 'Detailed information' },
-    { id: 'timeline', name: 'Timeline', description: 'Chronological events' },
-    { id: 'actions_taken', name: 'Actions Taken', description: 'Response procedures' },
-    { id: 'user_inputs', name: 'User Inputs', description: 'Collected data' },
-    { id: 'impact_assessment', name: 'Impact Assessment', description: 'Business impact analysis' },
-    { id: 'recommendations', name: 'Recommendations', description: 'Lessons learned' },
-    { id: 'artifacts', name: 'Artifacts', description: 'Evidence collected' }
-  ];
 
   if (loading) {
-    return <LoadingSpinner />;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <LoadingSpinner size="large" />
+      </div>
+    );
   }
 
-  if (!reportData) {
+  if (error) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-400">Report not found</p>
-        <button onClick={onCancel} className="mt-4 text-cerberus-red hover:text-red-400">
+        <p className="text-red-400 mb-4">Error: {error}</p>
+        <button onClick={onCancel} className="text-cerberus-red hover:text-red-400">
           Go Back
         </button>
       </div>
     );
   }
 
-  return (
-    <div className="h-full flex flex-col bg-gray-900">
-      {/* Header */}
-      <div className="bg-gray-800 border-b border-gray-700 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-white">{reportData.title}</h1>
-            <p className="text-gray-400 text-sm mt-1">Report Builder - Drag and drop elements to build your report</p>
-          </div>
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={() => setShowPreview(!showPreview)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
-            >
-              {showPreview ? 'Hide Preview' : 'Show Preview'}
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded transition-colors disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-            <button
-              onClick={handleGenerate}
-              disabled={generating || elements.length === 0}
-              className="px-4 py-2 bg-cerberus-red hover:bg-red-600 text-white rounded transition-colors disabled:opacity-50"
-            >
-              {generating ? 'Generating...' : 'Generate Report'}
-            </button>
-            <button
-              onClick={onCancel}
-              className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+  if (!reportData || !template) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-400 mb-4">No report or template found</p>
+        <button onClick={onCancel} className="text-cerberus-red hover:text-red-400">
+          Go Back
+        </button>
       </div>
+    );
+  }
 
-      {/* Error Message */}
-      {error && (
-        <div className="bg-red-900 border-l-4 border-red-500 text-red-100 p-4 mx-6 mt-4 rounded">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <p className="text-sm">{error}</p>
-            </div>
-            <div className="ml-auto pl-3">
-              <button
-                onClick={() => setError(null)}
-                className="text-red-400 hover:text-red-300"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+  const unmappedCount = detectedPlaceholders.length - Object.keys(elementMappings).length;
 
-      {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - Data Sources */}
-        <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
-          <div className="p-4 border-b border-gray-700">
-            <h2 className="text-lg font-medium text-white">Data Sources</h2>
-            <p className="text-gray-400 text-sm mt-1">Drag elements into your report sections</p>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Available Data Sources */}
-            {buildingContext?.data_sources && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-300 mb-3">Available Elements</h3>
-                <div className="space-y-2">
-                  {buildingContext.data_sources.map((dataSource, index) => (
-                    <div
-                      key={index}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, dataSource, 'data_source')}
-                      className="bg-gray-700 p-3 rounded-lg cursor-move hover:bg-gray-600 transition-colors border border-gray-600"
-                    >
-                      <div className="flex items-center">
-                        <span className="text-lg mr-2">{getElementIcon(dataSource.source_type)}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white text-sm font-medium truncate">
-                            {dataSource.display_name}
-                          </p>
-                          <p className="text-gray-400 text-xs truncate">
-                            {getElementTypeDisplay(dataSource.source_type)}
-                          </p>
-                          {dataSource.description && (
-                            <p className="text-gray-500 text-xs mt-1 truncate">
-                              {dataSource.description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Available Analytics */}
-            {buildingContext?.available_analytics && buildingContext.available_analytics.length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-300 mb-3">Analytics</h3>
-                <div className="space-y-2">
-                  {buildingContext.available_analytics.map((analytics, index) => (
-                    <div
-                      key={index}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, {
-                        source_type: 'analytics',
-                        source_id: analytics.metric,
-                        display_name: analytics.display_name,
-                        sample_value: analytics.value
-                      }, 'data_source')}
-                      className="bg-gray-700 p-3 rounded-lg cursor-move hover:bg-gray-600 transition-colors border border-gray-600"
-                    >
-                      <div className="flex items-center">
-                        <span className="text-lg mr-2">📊</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white text-sm font-medium truncate">
-                            {analytics.display_name}
-                          </p>
-                          <p className="text-gray-400 text-xs">
-                            Value: {analytics.value}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Available User Inputs */}
-            {buildingContext?.available_user_inputs && buildingContext.available_user_inputs.length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-300 mb-3">User Inputs</h3>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {buildingContext.available_user_inputs.map((input, index) => (
-                    <div
-                      key={index}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, {
-                        source_type: 'user_input',
-                        source_id: `input_${input.id}`,
-                        display_name: input.input_label || input.field_name,
-                        sample_value: JSON.stringify(input.user_input),
-                        execution_id: input.execution_id,
-                        field_name: input.field_name
-                      }, 'data_source')}
-                      className="bg-gray-700 p-3 rounded-lg cursor-move hover:bg-gray-600 transition-colors border border-gray-600"
-                    >
-                      <div className="flex items-center">
-                        <span className="text-lg mr-2">📝</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white text-sm font-medium truncate">
-                            {input.input_label || input.field_name}
-                          </p>
-                          <p className="text-gray-400 text-xs truncate">
-                            {input.phase_name} → {input.step_name}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Main Report Builder Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Section Navigation */}
-          <div className="bg-gray-750 border-b border-gray-700 px-6 py-3">
-            <div className="flex space-x-1 overflow-x-auto">
-              {reportSections.map(section => (
-                <button
-                  key={section.id}
-                  onClick={() => setActiveSection(section.id)}
-                  className={`px-4 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
-                    activeSection === section.id
-                      ? 'bg-cerberus-red text-white'
-                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                  }`}
+  return (
+    <div className="h-screen flex bg-gray-900 text-white">
+      {/* Left Sidebar - Available Data Sources */}
+      <div className="w-80 bg-gray-800 border-r border-gray-700 p-4 overflow-y-auto">
+        <h3 className="text-lg font-semibold mb-4 flex items-center">
+          <span className="mr-2">📦</span>
+          Available Data Sources
+        </h3>
+        
+        {/* Data Sources */}
+        {buildingContext?.data_sources && buildingContext.data_sources.length > 0 && (
+          <div className="mb-6">
+            <h4 className="text-sm font-medium text-gray-300 mb-3">Data Sources</h4>
+            <div className="space-y-2">
+              {buildingContext.data_sources.map((dataSource, index) => (
+                <div
+                  key={index}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, dataSource, 'data_source')}
+                  className="p-3 rounded-lg border border-gray-600 bg-gray-700 cursor-move transition-all hover:bg-gray-600 hover:shadow-lg"
                 >
-                  {section.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Report Section Content */}
-          <div
-            ref={dropZoneRef}
-            className="flex-1 overflow-y-auto p-6"
-            onDragOver={(e) => handleDragOver(e, activeSection)}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => handleDrop(e, activeSection)}
-          >
-            <div className="max-w-4xl mx-auto">
-              {/* Section Header */}
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold text-white">
-                  {reportSections.find(s => s.id === activeSection)?.name}
-                </h2>
-                <p className="text-gray-400 mt-1">
-                  {reportSections.find(s => s.id === activeSection)?.description}
-                </p>
-              </div>
-
-              {/* Drop Zone */}
-              <div className={`min-h-96 rounded-lg border-2 border-dashed transition-colors ${
-                dragOverSection === activeSection
-                  ? 'border-cerberus-red bg-red-900/10'
-                  : 'border-gray-600'
-              }`}>
-                {/* Existing Elements */}
-                <div className="p-4 space-y-4">
-                  {getSectionElements(activeSection).map((element, index) => (
-                    <div
-                      key={element.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, element, 'existing_element')}
-                      className="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-gray-600 transition-colors group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <span className="text-lg">{getElementIcon(element.element_type)}</span>
-                          <div>
-                            <h4 className="text-white font-medium">{element.display_name}</h4>
-                            <p className="text-gray-400 text-sm">
-                              {getElementTypeDisplay(element.element_type)}
-                              {element.template_variable && (
-                                <span className="ml-2 text-cerberus-red">
-                                  {`{{${element.template_variable}}}`}
-                                </span>
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => handleEditElement(element)}
-                            className="p-2 text-gray-400 hover:text-blue-400 transition-colors"
-                            title="Edit Element"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteElement(element.id)}
-                            className="p-2 text-gray-400 hover:text-red-400 transition-colors"
-                            title="Delete Element"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      
-                      {/* Element Preview */}
-                      {element.element_data && (
-                        <div className="mt-3 p-3 bg-gray-750 rounded text-sm">
-                          <p className="text-gray-300">
-                            <strong>Data:</strong> {JSON.stringify(element.element_data, null, 2)}
-                          </p>
-                        </div>
-                      )}
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-3 h-3 rounded-full ${getTypeColor(dataSource.source_type)}`} />
+                    <span className="text-lg">{getTypeIcon(dataSource.source_type)}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{dataSource.display_name}</p>
+                      <p className="text-xs text-gray-400 capitalize">{dataSource.source_type.replace('_', ' ')}</p>
                     </div>
-                  ))}
-
-                  {/* Empty State */}
-                  {getSectionElements(activeSection).length === 0 && (
-                    <div className="text-center py-12">
-                      <div className="text-gray-500 mb-4">
-                        <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        <p>No elements in this section yet</p>
-                        <p className="text-sm">Drag elements from the sidebar to add content</p>
-                      </div>
+                  </div>
+                  {dataSource.sample_value && (
+                    <div className="mt-2 text-xs text-gray-300 bg-gray-800 px-2 py-1 rounded max-h-20 overflow-y-auto">
+                      {dataSource.sample_value}
                     </div>
                   )}
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* User Inputs */}
+        {buildingContext?.available_user_inputs && buildingContext.available_user_inputs.length > 0 && (
+          <div className="mb-6">
+            <h4 className="text-sm font-medium text-gray-300 mb-3">User Inputs</h4>
+            <div className="space-y-2">
+              {buildingContext.available_user_inputs.map((userInput) => (
+                <div
+                  key={userInput.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, userInput, 'user_input')}
+                  className="p-3 rounded-lg border border-gray-600 bg-gray-700 cursor-move transition-all hover:bg-gray-600 hover:shadow-lg"
+                >
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 rounded-full bg-green-500" />
+                    <span className="text-lg">✏️</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{userInput.input_label || userInput.field_name}</p>
+                      <p className="text-xs text-gray-400">{userInput.phase_name} - {userInput.step_name}</p>
+                    </div>
+                  </div>
+                  {userInput.user_input && (
+                    <div className="mt-2 text-xs text-gray-300 bg-gray-800 px-2 py-1 rounded max-h-20 overflow-y-auto">
+                      {userInput.user_input}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Analytics */}
+        {buildingContext?.available_analytics && buildingContext.available_analytics.length > 0 && (
+          <div className="mb-6">
+            <h4 className="text-sm font-medium text-gray-300 mb-3">Analytics</h4>
+            <div className="space-y-2">
+              {buildingContext.available_analytics.map((analytic, index) => (
+                <div
+                  key={index}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, analytic, 'analytics')}
+                  className="p-3 rounded-lg border border-gray-600 bg-gray-700 cursor-move transition-all hover:bg-gray-600 hover:shadow-lg"
+                >
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 rounded-full bg-purple-500" />
+                    <span className="text-lg">📊</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{analytic.display_name}</p>
+                      <p className="text-xs text-gray-400">{analytic.description}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-gray-300 bg-gray-800 px-2 py-1 rounded">
+                    Value: {analytic.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg">
+          <h4 className="text-sm font-medium text-blue-400 mb-2">💡 How to Use</h4>
+          <ul className="text-xs text-gray-300 space-y-1">
+            <li>• Drag data records to placeholders</li>
+            <li>• Red placeholders are unmapped</li>
+            <li>• Green placeholders are mapped</li>
+            <li>• Click placeholders for custom input</li>
+            <li>• Use Preview mode to see results</li>
+          </ul>
+        </div>
+      </div>
+
+      {/* Center - Template with Placeholders */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-gray-800 border-b border-gray-700 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <span className="text-2xl">📝</span>
+              <div>
+                <h2 className="text-xl font-semibold">{reportData.title}</h2>
+                <p className="text-sm text-gray-400">Template: {template.name}</p>
               </div>
+            </div>
+            <div className="flex items-center space-x-3">
+              <div className="text-sm text-gray-400">
+                Mapped: <span className="text-green-400">{Object.keys(elementMappings).length}</span> / 
+                <span className="text-gray-300"> {detectedPlaceholders.length}</span>
+              </div>
+              <button
+                onClick={() => setPreviewMode(!previewMode)}
+                className={`px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 ${
+                  previewMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+              >
+                <span>{previewMode ? '✏️' : '👁️'}</span>
+                <span>{previewMode ? 'Edit Mode' : 'Preview Mode'}</span>
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Right Sidebar - Preview (Optional) */}
-        {showPreview && (
-          <div className="w-96 bg-gray-800 border-l border-gray-700 flex flex-col">
-            <div className="p-4 border-b border-gray-700">
-              <h2 className="text-lg font-medium text-white">Live Preview</h2>
-              <p className="text-gray-400 text-sm mt-1">Preview of current section</p>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="bg-white text-black p-4 rounded-lg text-sm">
-                <h3 className="font-bold mb-3">
-                  {reportSections.find(s => s.id === activeSection)?.name}
-                </h3>
-                
-                {getSectionElements(activeSection).map(element => (
-                  <div key={element.id} className="mb-3 p-2 border-l-2 border-blue-500 bg-blue-50">
-                    <strong>{element.display_name}:</strong>
-                    <br />
-                    <span className="text-gray-700">
-                      {element.element_data?.value || '[Dynamic Content]'}
-                    </span>
-                  </div>
-                ))}
-                
-                {getSectionElements(activeSection).length === 0 && (
-                  <p className="text-gray-500 italic">No content added yet</p>
-                )}
+        {/* Template Content */}
+        <div className="flex-1 p-6 overflow-y-auto">
+          {previewMode ? (
+            <div className="bg-white text-black p-8 rounded-lg shadow-lg">
+              <div className="prose prose-sm max-w-none">
+                <div 
+                  className="font-sans text-sm leading-relaxed"
+                  dangerouslySetInnerHTML={{ 
+                    __html: renderPreviewContent(generatePreview()) 
+                  }}
+                />
               </div>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2 text-sm text-gray-400 mb-4">
+                <span className="flex items-center space-x-2">
+                  <span className="w-3 h-3 bg-red-500 rounded"></span>
+                  <span>Unmapped</span>
+                </span>
+                <span className="flex items-center space-x-2">
+                  <span className="w-3 h-3 bg-green-500 rounded"></span>
+                  <span>Mapped</span>
+                </span>
+                <span className="flex items-center space-x-2">
+                  <span className="w-3 h-3 bg-blue-500 rounded"></span>
+                  <span>Drop Zone Active</span>
+                </span>
+              </div>
+              
+              <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                <div className="font-mono text-sm whitespace-pre-wrap leading-relaxed">
+                  {template.content.split(/(\{\{[^}]+\}\})/).map((part, index) => {
+                    const isPlaceholder = part.match(/\{\{([^}]+)\}\}/);
+                    
+                    if (isPlaceholder) {
+                      const variable = isPlaceholder[1].trim();
+                      const mapping = elementMappings[variable];
+                      
+                      return (
+                        <span
+                          key={index}
+                          onDragOver={handleDragOver}
+                          onDrop={(e) => handleDrop(e, { variable })}
+                          onClick={() => handleCustomInput({ variable })}
+                          className={`inline-block px-3 py-2 mx-1 rounded-lg border-2 border-dashed transition-all cursor-pointer ${
+                            mapping
+                              ? 'border-green-500 bg-green-900/20 text-green-300 hover:bg-green-900/30'
+                              : 'border-red-500 bg-red-900/20 text-red-300 hover:border-red-400 hover:bg-red-900/30'
+                          }`}
+                          title={mapping 
+                            ? `Mapped to: ${mapping.displayName}\nClick to edit or drag new data here` 
+                            : `Unmapped placeholder: ${variable}\nDrop data here or click for custom input`
+                          }
+                        >
+                          {mapping ? (
+                            <span className="flex items-center space-x-2">
+                              <span className="text-green-400 font-medium">{mapping.displayName}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeMapping(variable);
+                                }}
+                                className="text-red-400 hover:text-red-300 font-bold text-lg leading-none"
+                                title="Remove mapping"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="text-red-400 flex items-center space-x-1">
+                              <span>{part}</span>
+                              <span className="text-xs opacity-60">📝</span>
+                            </span>
+                          )}
+                        </span>
+                      );
+                    }
+                    
+                    return <span key={index}>{part}</span>;
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Element Edit Modal */}
-      {showElementModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-lg max-w-md w-full">
-            <div className="flex justify-between items-center p-6 border-b border-gray-700">
-              <h3 className="text-lg font-medium text-white">
-                {editingElement ? 'Edit Element' : 'Add Element'}
-              </h3>
-              <button
-                onClick={() => {
-                  setShowElementModal(false);
-                  setEditingElement(null);
-                  resetElementModal();
-                }}
-                className="text-gray-400 hover:text-white transition-colors"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Display Name
-                </label>
-                <input
-                  type="text"
-                  value={newElementData.display_name}
-                  onChange={(e) => setNewElementData(prev => ({
-                    ...prev,
-                    display_name: e.target.value
-                  }))}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Template Variable
-                </label>
-                <input
-                  type="text"
-                  value={newElementData.template_variable}
-                  onChange={(e) => setNewElementData(prev => ({
-                    ...prev,
-                    template_variable: e.target.value
-                  }))}
-                  placeholder="variable_name"
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
-                />
-                <p className="text-gray-400 text-xs mt-1">
-                  Will be used as {`{{${newElementData.template_variable || 'variable_name'}}}`} in the template
-                </p>
-              </div>
-              
-              {newElementData.element_type === 'static_text' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Content
-                  </label>
-                  <textarea
-                    value={newElementData.element_data.content || ''}
-                    onChange={(e) => setNewElementData(prev => ({
-                      ...prev,
-                      element_data: {
-                        ...prev.element_data,
-                        content: e.target.value
-                      }
-                    }))}
-                    rows={4}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-cerberus-red focus:border-transparent"
-                    placeholder="Enter static text content..."
-                  />
+      {/* Right Sidebar - Mapping Summary and Actions */}
+      <div className="w-80 bg-gray-800 border-l border-gray-700 p-4 overflow-y-auto">
+        <h3 className="text-lg font-semibold mb-4 flex items-center">
+          <span className="mr-2">🎯</span>
+          Placeholder Mappings
+        </h3>
+        
+        <div className="space-y-3">
+          {detectedPlaceholders.map((placeholder) => {
+            const mapping = elementMappings[placeholder.variable];
+            return (
+              <div key={placeholder.id} className="bg-gray-700 p-3 rounded-lg border border-gray-600">
+                <div className="flex items-center justify-between mb-2">
+                  <code className="text-sm text-blue-400 bg-gray-800 px-2 py-1 rounded">
+                    {placeholder.fullMatch}
+                  </code>
+                  <div className="flex space-x-1">
+                    <button
+                      onClick={() => handleCustomInput(placeholder)}
+                      className="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded bg-blue-900/20 hover:bg-blue-900/40 transition-colors"
+                      title="Custom input"
+                    >
+                      ✏️
+                    </button>
+                    {mapping && (
+                      <button
+                        onClick={() => removeMapping(placeholder.variable)}
+                        className="text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded bg-red-900/20 hover:bg-red-900/40 transition-colors"
+                      >
+                        🗑️
+                      </button>
+                    )}
+                  </div>
                 </div>
-              )}
+                
+                {mapping ? (
+                  <div className="text-sm">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <span className={`w-3 h-3 rounded-full ${getTypeColor(mapping.recordType)}`} />
+                      <span className="text-green-400 font-medium">{mapping.displayName}</span>
+                    </div>
+                    <div className="text-gray-400 text-xs mb-2 capitalize">
+                      Type: {mapping.recordType.replace('_', ' ')}
+                    </div>
+                    <div className="text-gray-300 text-xs bg-gray-800 px-2 py-1 rounded max-h-16 overflow-y-auto">
+                      {mapping.value}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-2 text-red-400 text-sm">
+                    <span>⚠️</span>
+                    <span>Click to add custom input</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {detectedPlaceholders.length === 0 && (
+          <div className="text-center py-8 text-gray-400">
+            <span className="text-4xl mb-2 block">📄</span>
+            <p className="text-sm">No placeholders detected</p>
+            <p className="text-xs mt-1">Template may not contain Jinja placeholders</p>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="mt-6 pt-4 border-t border-gray-700 space-y-3">
+          {/* Progress Bar */}
+          <div>
+            <div className="flex justify-between text-xs text-gray-400 mb-2">
+              <span>Progress</span>
+              <span>{Object.keys(elementMappings).length} / {detectedPlaceholders.length}</span>
+            </div>
+            <div className="w-full bg-gray-600 rounded-full h-2">
+              <div 
+                className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                style={{ 
+                  width: detectedPlaceholders.length > 0 
+                    ? `${(Object.keys(elementMappings).length / detectedPlaceholders.length) * 100}%` 
+                    : '0%' 
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Fill N/A Button */}
+          {unmappedCount > 0 && (
+            <button
+              onClick={fillRemainingWithNA}
+              className="w-full bg-yellow-600 hover:bg-yellow-700 text-white py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
+              title={`Fill ${unmappedCount} unmapped placeholder${unmappedCount !== 1 ? 's' : ''} with "N/A"`}
+            >
+              <span>⚠️</span>
+              <span>Fill {unmappedCount} with N/A</span>
+            </button>
+          )}
+
+          <button
+            onClick={onCancel}
+            className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
+          >
+            <span>←</span>
+            <span>Back to Reports</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setSaving(true);
+              onSave?.(reportData).finally(() => setSaving(false));
+            }}
+            disabled={saving}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+          >
+            <span>💾</span>
+            <span>{saving ? 'Saving...' : 'Save Progress'}</span>
+          </button>
+
+          <button
+            onClick={() => onGenerate?.(report.id)}
+            className={`w-full py-3 px-4 rounded-lg transition-colors font-medium flex items-center justify-center space-x-2 ${
+              Object.keys(elementMappings).length === detectedPlaceholders.length && detectedPlaceholders.length > 0
+                ? 'bg-green-600 hover:bg-green-700 text-white'
+                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+            }`}
+            disabled={Object.keys(elementMappings).length !== detectedPlaceholders.length || detectedPlaceholders.length === 0}
+          >
+            <span>🚀</span>
+            <span>
+              {Object.keys(elementMappings).length === detectedPlaceholders.length && detectedPlaceholders.length > 0
+                ? 'Generate Report'
+                : `Map ${detectedPlaceholders.length - Object.keys(elementMappings).length} more placeholder${detectedPlaceholders.length - Object.keys(elementMappings).length !== 1 ? 's' : ''}`
+              }
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Custom Input Modal */}
+      {showCustomInputModal && selectedPlaceholder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-96 border border-gray-700">
+            <h3 className="text-lg font-semibold text-white mb-4">
+              Custom Input for {selectedPlaceholder.variable}
+            </h3>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Value
+              </label>
+              <textarea
+                value={customInputValue}
+                onChange={(e) => setCustomInputValue(e.target.value)}
+                placeholder={`Enter value for ${selectedPlaceholder.variable}`}
+                rows={4}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                This will be used as the value for <code className="bg-gray-700 px-1 rounded">{`{{ ${selectedPlaceholder.variable} }}`}</code>
+              </p>
             </div>
             
-            <div className="flex justify-end space-x-3 p-6 border-t border-gray-700">
+            <div className="flex justify-end space-x-3">
               <button
                 onClick={() => {
-                  setShowElementModal(false);
-                  setEditingElement(null);
-                  resetElementModal();
+                  setShowCustomInputModal(false);
+                  setSelectedPlaceholder(null);
+                  setCustomInputValue('');
                 }}
                 className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={handleSaveElement}
-                className="px-4 py-2 bg-cerberus-red hover:bg-red-600 text-white rounded transition-colors"
+                onClick={saveCustomInput}
+                disabled={!customInputValue.trim()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Save Element
+                Save Input
               </button>
             </div>
           </div>

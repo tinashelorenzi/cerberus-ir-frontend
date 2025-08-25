@@ -95,14 +95,34 @@ const ReportBuildWizard = ({ isOpen, onClose, onReportCreated }) => {
   const loadAvailableTemplates = async () => {
     try {
       setLoadingTemplates(true);
-      const response = await ReportTemplateAPI.getTemplates({
+      console.log('🔄 Loading templates...');
+      
+      const requestParams = {
         status: 'active',
         limit: 100
-      });
+      };
+      console.log('📝 Request params:', requestParams);
+      
+      const response = await ReportTemplateAPI.getTemplates(requestParams);
+      console.log('✅ Raw API response:', response);
+      console.log('📊 Templates in response:', response.templates);
+      console.log('🔢 Template count:', response.templates?.length || 0);
+      
+      if (response.templates && response.templates.length > 0) {
+        console.log('📋 First template example:', response.templates[0]);
+      } else {
+        console.warn('⚠️ No templates found in response');
+      }
+      
       setAvailableTemplates(response.templates || []);
     } catch (err) {
-      console.error('Failed to load templates:', err);
-      setError('Failed to load report templates');
+      console.error('❌ Failed to load templates:', err);
+      console.error('🔍 Error details:', {
+        message: err.message,
+        response: err.response,
+        stack: err.stack
+      });
+      setError('Failed to load report templates: ' + err.message);
     } finally {
       setLoadingTemplates(false);
     }

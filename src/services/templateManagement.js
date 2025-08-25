@@ -69,17 +69,38 @@ class ReportTemplateAPI {
     // Add sorting params
     if (params.sort_by) searchParams.append('sort_by', params.sort_by);
     if (params.sort_order) searchParams.append('sort_order', params.sort_order);
-
-    console.log("Fetching templates from fastAPI backnd");
-    const response = await fetch(
-      `${this.baseURL}/api/v1/report-templates?${searchParams.toString()}`,
-      {
-        method: 'GET',
-        headers: this.getAuthHeaders()
+  
+    const url = `${this.baseURL}/api/v1/report-templates?${searchParams.toString()}`;
+    console.log('🌐 Making request to:', url);
+    console.log('📋 Auth headers:', this.getAuthHeaders());
+  
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.getAuthHeaders()
+    });
+  
+    console.log('📡 Response status:', response.status);
+    console.log('📄 Response headers:', Object.fromEntries(response.headers.entries()));
+  
+    if (!response.ok) {
+      console.error('❌ Response not ok:', {
+        status: response.status,
+        statusText: response.statusText,
+        url: response.url
+      });
+      
+      // Try to get error details
+      try {
+        const errorText = await response.text();
+        console.error('📝 Response body:', errorText);
+      } catch (e) {
+        console.error('💥 Could not read response body:', e);
       }
-    );
-
-    return this.handleResponse(response);
+    }
+  
+    const data = await this.handleResponse(response);
+    console.log('✨ Processed response data:', data);
+    return data;
   }
 
   // Get a specific report template by ID
